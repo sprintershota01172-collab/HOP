@@ -7,6 +7,8 @@
 - 計算はすべて端末内。入力は自動保存（IndexedDB）、JSONの書き出し・読み込み、1日1回の自動バックアップ
 - PWA（ホーム画面に追加・オフライン動作）
 
+**アプリを開く**: https://sprintershota01172-collab.github.io/HOP/
+
 ## 画面
 
 | 画面 | できること |
@@ -128,7 +130,7 @@ npm run test:e2e    # 画面のテスト（12件）
 
 ## GitHub Pages への公開
 
-1. このフォルダの内容をリポジトリ（例: HOPPY の新しいブランチ）に push
+1. このフォルダの内容をリポジトリ（このアプリは `HOP`）に push
 2. GitHub のリポジトリ設定 → Pages → Source を **GitHub Actions** にする
 3. `main` に取り込むか、Actions タブから「Test & deploy to GitHub Pages」を手動実行
 4. テストがすべて通ると `https://<ユーザー名>.github.io/<リポジトリ名>/` に公開されます
