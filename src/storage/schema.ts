@@ -54,7 +54,7 @@ export function migrate(raw: unknown): AppData {
   };
   plan.self.id = 'self';
   if (plan.spouse) plan.spouse.id = 'spouse';
-  for (const k of ['debts', 'children', 'living', 'insurances', 'investments', 'goals', 'events', 'work'] as const) {
+  for (const k of ['debts', 'children', 'living', 'insurances', 'investments', 'goals', 'events', 'work', 'incomeChanges'] as const) {
     if (!Array.isArray(plan[k])) (plan as unknown as Record<string, unknown[]>)[k] = [];
   }
   return {

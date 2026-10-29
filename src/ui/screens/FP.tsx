@@ -317,7 +317,7 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
           <small className="micro" style={{ fontWeight: 400 }}>
             {' '}
             {year}年・月平均{months < 12 ? `（${months}か月）` : ''}
-            {rows.some((r) => r.once) ? `・一時＝年の合計÷${months}` : ''}
+            {rows.some((r) => r.once || r.span) ? `・合計÷${months}か月` : ''}
           </small>
         </span>
         {rest && short && <b className={`num${slice.value < 0 ? ' neg' : ''}`} style={{ flex: 'none' }}>= {yen(slice.value)}</b>}
@@ -345,6 +345,7 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
               <span className="nm ellipsis">{r.label}</span>
               <span className="v">
                 {r.once && <em className="once">一時</em>}
+                {r.span && r.perMonth != null && <em className="once span">{r.span} 月{yen(r.perMonth)}</em>}
                 {yen(r.value)}
               </span>
               {r.sheet ? <Icon name="right" /> : <span />}

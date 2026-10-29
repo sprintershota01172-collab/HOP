@@ -9,20 +9,20 @@ import { Home } from './screens/Home';
 import { Loan } from './screens/Loan';
 import { Memo } from './screens/Memo';
 import { HouseDetailSheet, HouseEditSheet, WeightsSheet } from './sheets/house';
-import { BasisSheet, ConfirmSheet, FpBasisSheet, LoanTermsSheet, MemoEditSheet, SettingsSheet, WizardSheet } from './sheets/misc';
+import { BasisSheet, ConfirmSheet, FpBasisSheet, LoanTermsSheet, MemoEditSheet, PrepayEditSheet, SaleSheet, SettingsSheet, WizardSheet } from './sheets/misc';
 import {
-  AssumptionsSheet, ChildEditSheet, ChildrenSheet, DebtEditSheet, EventEditSheet, EventsSheet, GoalEditSheet, GoalsSheet, HousingSheet, IncomeSheet,
+  AssumptionsSheet, ChildEditSheet, ChildrenSheet, DebtEditSheet, EventEditSheet, EventsSheet, GoalEditSheet, GoalsSheet, HousingSheet, IncomeChangeSheet, IncomeSheet,
   InsEditSheet, InsuranceSheet, InvEditSheet, InvestSheet, LivingAddSheet, LivingItemsSheet, LivingEditSheet, LivingSheet, SavingsSheet, WorkEditSheet, WorkSheet,
   type SheetProps,
 } from './sheets/plan';
 import { useStore, type Tab } from './store';
 
 const SHEETS: Record<string, (p: SheetProps) => ReactElement | null> = {
-  income: IncomeSheet, savings: SavingsSheet, debtEdit: DebtEditSheet, children: ChildrenSheet, childEdit: ChildEditSheet,
+  income: IncomeSheet, incomeChange: IncomeChangeSheet, savings: SavingsSheet, debtEdit: DebtEditSheet, children: ChildrenSheet, childEdit: ChildEditSheet,
   living: LivingSheet, livingItems: LivingItemsSheet, livingAdd: LivingAddSheet, livingEdit: LivingEditSheet, insurance: InsuranceSheet, insEdit: InsEditSheet,
   invest: InvestSheet, invEdit: InvEditSheet, goals: GoalsSheet, goalEdit: GoalEditSheet, events: EventsSheet, eventEdit: EventEditSheet,
   work: WorkSheet, workEdit: WorkEditSheet, housing: HousingSheet, assumptions: AssumptionsSheet,
-  basis: BasisSheet, fpBasis: FpBasisSheet, loanTerms: LoanTermsSheet, memoEdit: MemoEditSheet, settings: SettingsSheet,
+  basis: BasisSheet, fpBasis: FpBasisSheet, loanTerms: LoanTermsSheet, prepayEdit: PrepayEditSheet, sale: SaleSheet, memoEdit: MemoEditSheet, settings: SettingsSheet,
   confirm: ConfirmSheet, wizard: WizardSheet, houseEdit: HouseEditSheet, houseDetail: HouseDetailSheet, weights: WeightsSheet,
 };
 

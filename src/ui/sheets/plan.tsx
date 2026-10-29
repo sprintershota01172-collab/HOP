@@ -8,6 +8,7 @@ import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
 import { EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE } from '../../engine/reference';
 import { childMonth, eventMonths } from '../../engine/simulate';
+import { marginalTaxRate } from '../../engine/tax';
 import type { Child, Debt, Insurance, Investment, LifeEvent, LivingItem, LivingStd, Owner, Person, Plan, WorkChange } from '../../engine/types';
 import { ageAt, nowYM, ymYear } from '../../engine/ym';
 import { Kpi } from '../components/bits';
@@ -91,9 +92,11 @@ export function IncomeSection() {
             </button>
           </div>
         ) : (
-          <Paged pages={[{ value: 'income', label: '収入' }, { value: 'retire', label: '退職・年金' }]}>
+          <Paged pages={[{ value: 'income', label: '収入' }, { value: 'change', label: '収入の変化' }, { value: 'retire', label: '退職・年金' }]}>
             {(page) =>
-              page === 'income' ? (
+              page === 'change' ? (
+                <IncomeChanges who={who} person={person} set={set} />
+              ) : page === 'income' ? (
                 <>
                   <div className="grid2">
                     <TextField label="呼び名" value={person.name} onChange={(v) => set((x) => void (x.name = v))} />
@@ -144,6 +147,55 @@ export function IncomeSection() {
     </>
   );
 }
+/** 収入が途中で変わる予定（転職・昇進など）と、定年後の再雇用 */
+function IncomeChanges({ who, person, set }: { who: Owner; person: Person; set: (fn: (x: Person) => void) => void }) {
+  const { s, p, up } = usePlan();
+  const list = p.incomeChanges.filter((c) => c.owner === who).sort((a, b) => a.ym - b.ym);
+  const rh = person.rehire ?? null;
+  return (
+    <>
+      <ItemList
+        per={2}
+        rows={list.map((c) => ({ id: c.id, icon: 'briefcase', title: `${ymText(c.ym)}から${c.note ? `（${c.note}）` : ''}`, sub: `賞与 ${c.bonusNetAnnual == null ? '変わらない' : `年${yen(c.bonusNetAnnual)}`}`, right: <b className="num">月{yen(c.netMonthly)}</b> }))}
+        onPick={(id) => s.open({ kind: 'incomeChange', props: { id } })}
+        onAdd={() => {
+          const id = uid('inc');
+          up((pl) => void pl.incomeChanges.push({ id, owner: who, ym: nowYM() + 36, netMonthly: Math.round(((person.netMonthly ?? 0) * 1.1) / 10_000) * 10_000, bonusNetAnnual: null, note: '' }));
+          s.open({ kind: 'incomeChange', props: { id } });
+        }}
+        addLabel="手取りが変わる予定を追加"
+        empty="転職・昇進・時短の終了などで、ある月から手取りが変わる予定を入れられます（その後は昇給率で増えます）"
+      />
+      <Toggle label="定年後に再雇用で働く" value={!!rh} onChange={(v) => set((x) => void (x.rehire = v ? { untilAge: 65, netMonthly: Math.round(((x.netMonthly ?? 200_000) * 0.6) / 10_000) * 10_000 } : null))} />
+      {rh && (
+        <div className="grid2">
+          <MoneyField label="再雇用の手取り月収" per="month" nullable={false} value={rh.netMonthly} onChange={(v) => set((x) => void (x.rehire = { ...rh, netMonthly: v ?? 0 }))} />
+          <NumField label="何歳まで" unit="歳" nullable={false} min={(person.retireAge ?? 65) + 1} max={80} value={rh.untilAge} onChange={(v) => set((x) => void (x.rehire = { ...rh, untilAge: Math.round(v ?? 65) }))} hint={`退職 ${person.retireAge ?? 65}歳から`} />
+        </div>
+      )}
+    </>
+  );
+}
+
+export function IncomeChangeSheet({ close, props }: SheetProps) {
+  const { s, p, up } = usePlan();
+  const c = p.incomeChanges.find((x) => x.id === props.id);
+  if (!c) return null;
+  const set = (fn: (x: Plan['incomeChanges'][number]) => void) => up((pl) => fn(pl.incomeChanges.find((x) => x.id === c.id)!));
+  return (
+    <Sheet title="手取りが変わる予定" onClose={close} preview short foot={<><DeleteBtn onDelete={() => { up((pl) => void (pl.incomeChanges = pl.incomeChanges.filter((x) => x.id !== c.id))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}>
+      <div className="grid2">
+        <YMField label="いつから" nullable={false} value={c.ym} onChange={(v) => v != null && set((x) => void (x.ym = v))} from={THIS_YEAR} to={THIS_YEAR + 45} />
+        <TextField label="メモ" value={c.note} placeholder="転職・昇進など" onChange={(v) => set((x) => void (x.note = v))} />
+      </div>
+      <div className="grid2">
+        <MoneyField label="手取り月収" per="month" nullable={false} value={c.netMonthly} onChange={(v) => set((x) => void (x.netMonthly = v ?? 0))} />
+        <MoneyField label="賞与（年合計）" hint="空欄は変えない" per="year" value={c.bonusNetAnnual} placeholder="変えない" onChange={(v) => set((x) => void (x.bonusNetAnnual = v))} />
+      </div>
+    </Sheet>
+  );
+}
+
 export const IncomeSheet = ({ close }: SheetProps) => (
   <Sheet title="収入" onClose={close} preview foot={<Done close={close} />}>
     <IncomeSection />
@@ -797,6 +849,11 @@ export function InvEditSheet({ close, props }: SheetProps) {
                 {p.spouse ? <Seg label="名義" value={it.owner} onChange={(v) => set((x) => void (x.owner = v))} options={[{ value: 'self', label: p.self.name || '本人' }, { value: 'spouse', label: p.spouse.name || '配偶者' }]} /> : <div />}
               </div>
               <Seg label="口座" value={it.kind} onChange={(v) => set((x) => void (x.kind = v))} options={(Object.keys(INV_LABEL) as Investment['kind'][]).map((k) => ({ value: k, label: INV_LABEL[k].replace('NISA ', '') }))} />
+              {it.kind === 'ideco' && (
+                <div className="micro" style={{ lineHeight: 1.5 }}>
+                  掛金は全額が所得控除。年の掛金 × 税率（目安 {Math.round(marginalTaxRate(s.vm?.people.find((q) => q.id === it.owner)?.gross ?? 0) * 1000) / 10}%）が12月の年末調整で戻る計算です。60歳まで引き出せません。
+                </div>
+              )}
               <div className="grid2">
                 <MoneyField label="いまの残高" nullable={false} value={it.balance} onChange={(v) => set((x) => void (x.balance = v ?? 0))} />
                 <MoneyField label="毎月の積立" per="month" nullable={false} value={it.monthly} onChange={(v) => set((x) => void (x.monthly = v ?? 0))} />

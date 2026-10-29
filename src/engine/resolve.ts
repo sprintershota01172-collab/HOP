@@ -17,6 +17,8 @@ export interface RPerson {
   pensionYM: YM;
   pension: Yen;
   cash: Yen;
+  rehire: { untilYM: YM; net: Yen } | null;
+  changes: { ym: YM; net: Yen; bonus: Yen | null }[];
 }
 
 export interface Assumed {
@@ -113,6 +115,8 @@ export function resolvePlan(plan: Plan): Resolved {
       pensionYM: birthYM + pensionStartAge * 12,
       pension,
       cash: p.cash ?? 0,
+      rehire: p.rehire && p.rehire.netMonthly > 0 ? { untilYM: birthYM + p.rehire.untilAge * 12, net: p.rehire.netMonthly } : null,
+      changes: (plan.incomeChanges ?? []).filter((c) => c.owner === p.id).map((c) => ({ ym: c.ym, net: c.netMonthly, bonus: c.bonusNetAnnual })).sort((a, b) => a.ym - b.ym),
     });
   }
 

@@ -388,7 +388,7 @@ export function metricsOf(ctx: Context, sim: SimResult): Metrics {
   if (minCash === Infinity) minCash = rows[p]?.cash ?? 0;
   const sched = sim.schedule;
   const self = ctx.r.people[0];
-  const payoffAge = sched && sim.purchase && self ? ageAt(self.birthYM, sim.purchase.ym + sched.months) : 0;
+  const payoffAge = sched && sim.purchase && self ? ageAt(self.birthYM, sim.purchase.ym + sched.lastK) : 0;
   const firstYearPay = sched ? sched.monthly.slice(0, 12).reduce((s, v) => s + v, 0) + sched.bonus.slice(0, 12).reduce((s, v) => s + v, 0) : 0;
   const gross = ctx.bank.gross;
   const initial = ctx.r.people.reduce((s, x) => s + x.cash, 0) + ctx.r.plan.investments.reduce((s, x) => s + x.balance, 0);

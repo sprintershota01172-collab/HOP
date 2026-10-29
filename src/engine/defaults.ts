@@ -103,6 +103,7 @@ export function emptyPlan(baseYM: number): Plan {
     living: [],
     pocket: { self: null, spouse: null, free: null },
     saving: { monthly: null, bonus: null },
+    incomeChanges: [],
     insurances: [],
     investments: [],
     goals: [],

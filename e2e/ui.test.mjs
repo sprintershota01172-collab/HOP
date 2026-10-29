@@ -432,6 +432,51 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('繰上返済・収入の変化・売却を入力でき、画面に収まる', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    // 繰上返済（ローンの条件）
+    await page.click('nav button:nth-child(4)');
+    await page.click('.screen .btn:has-text("条件")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("繰上返済")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('.btn:has-text("繰上返済を追加")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await sheet().locator('h2').textContent(), '繰上返済');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await page.waitForSelector('.sheet:not(.closing) .card.flat:has-text("減る利息")', { timeout: 15000 });
+    assert.ok((await sheetOverflow(page)) <= 1, '繰上返済の画面');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 収入の変化
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("収入")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("収入の変化")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('button[aria-label="定年後に再雇用で働く"]').click();
+    await page.waitForTimeout(300);
+    assert.equal(await sheet().locator('.field:has-text("再雇用の手取り月収")').count(), 1);
+    assert.ok((await sheetOverflow(page)) <= 1, '収入の変化の画面');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 売却
+    await page.click('.screen .seg button:has-text("将来の家計")');
+    await page.waitForTimeout(300);
+    await page.click('.screen .chip:has-text("前提")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.item:has-text("売却・住み替え")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('button[aria-label="家を売却する予定がある"]').click();
+    await page.waitForTimeout(400);
+    assert.ok((await sheetOverflow(page)) <= 1, '売却の画面');
+    await ctx.close();
+  });
+
   it('タブを素早く連打しても、最後に選んだ画面1枚だけが残る', async () => {
     const { ctx, page } = await open([390, 844]);
     for (const i of [2, 3, 4, 5, 1, 4, 2, 3]) await page.click(`nav button:nth-child(${i})`, { delay: 0 });

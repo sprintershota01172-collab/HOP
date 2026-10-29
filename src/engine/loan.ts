@@ -25,6 +25,10 @@ export interface LoanSpec {
   bonusShare: Rate;
   /** 返済k回目（1始まり、借入翌月=1）の適用金利（年） */
   rateAt: (k: number) => Rate;
+  /** 繰上返済（k回目の返済の後に、毎月返済部分の元金へ充てる） */
+  prepay?: { k: number; amount: Yen; mode: 'shorten' | 'reduce' }[];
+  /** 変動金利の5年ルール・125%ルール（返済額の見直しは5年ごと、上限は前の1.25倍。払いきれない利息は未払利息として持ち越し、最終回に精算） */
+  rule125?: boolean;
 }
 
 export interface LoanSchedule {
@@ -36,11 +40,16 @@ export interface LoanSchedule {
   principalPaid: number[];
   balance: number[];
   rate: number[];
+  /** k-1 番目 = k回目の後に繰上返済した額 */
+  prepaid: number[];
   totalPayment: Yen;
   totalInterest: Yen;
   totalPrincipal: Yen;
+  totalPrepaid: Yen;
   firstMonthly: Yen;
   maxMonthly: Yen;
+  /** 実際に完済する回（繰上返済で早まる） */
+  lastK: number;
 }
 
 /**
@@ -60,11 +69,14 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
     principalPaid: new Array(n).fill(0),
     balance: new Array(n).fill(0),
     rate: new Array(n).fill(0),
+    prepaid: new Array(n).fill(0),
     totalPayment: 0,
     totalInterest: 0,
     totalPrincipal: 0,
+    totalPrepaid: 0,
     firstMonthly: 0,
     maxMonthly: 0,
+    lastK: n,
   };
   const P = Math.max(0, Math.round(spec.principal));
   if (n === 0 || P === 0) return out;
@@ -83,6 +95,13 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
   const eqPrinM = Math.floor(Pm / n);
   const eqPrinB = bonusPeriods > 0 ? Math.floor(Pb / bonusPeriods) : 0;
 
+  const rule = !!spec.rule125 && spec.method === 'annuity';
+  let unpaid = 0; // 125%ルールで持ち越した未払利息
+  let recalc = false; // 返済額軽減型の繰上返済の後は、翌月に返済額を計算し直す
+  let eqM = eqPrinM;
+  const prepays = new Map<number, { amount: number; mode: 'shorten' | 'reduce' }[]>();
+  for (const x of spec.prepay ?? []) if (x.k >= 1 && x.k < n && x.amount > 0) prepays.set(x.k, [...(prepays.get(x.k) ?? []), x]);
+
   for (let k = 1; k <= n; k++) {
     const r = spec.rateAt(k);
     out.rate[k - 1] = r;
@@ -91,23 +110,52 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
     let monthlyPay = 0;
 
     // --- 毎月返済部分 ---
-    if (balM > 0) {
+    if (balM > 0 || unpaid > 0) {
       const im = Math.floor((balM * r) / 12);
       let pm: number;
       if (spec.method === 'annuity') {
-        if (Number.isNaN(lastRateM) || ((k - 1) % 12 === 0 && r !== lastRateM)) {
-          payM = Math.round(annuityPayment(balM, r / 12, n - k + 1));
+        const due = rule ? (k - 1) % 60 === 0 : (k - 1) % 12 === 0;
+        if (Number.isNaN(lastRateM) || recalc || (due && r !== lastRateM)) {
+          let next = Math.round(annuityPayment(balM, r / 12, n - k + 1));
+          if (rule && !Number.isNaN(lastRateM) && !recalc) next = Math.min(next, Math.floor(payM * 1.25));
+          payM = next;
           lastRateM = r;
+          recalc = false;
         }
-        pm = Math.max(0, payM - im);
+        if (rule) {
+          const owe = im + unpaid;
+          if (k === n) {
+            pm = balM;
+            interest += owe;
+            unpaid = 0;
+          } else if (payM >= owe) {
+            pm = Math.min(balM, payM - owe);
+            interest += owe;
+            unpaid = 0;
+          } else {
+            pm = 0;
+            interest += payM;
+            unpaid = owe - payM;
+          }
+          balM -= pm;
+          principal += pm;
+          monthlyPay = interest + pm;
+        } else {
+          pm = Math.max(0, payM - im);
+          if (k === n || pm >= balM) pm = balM;
+          balM -= pm;
+          interest += im;
+          principal += pm;
+          monthlyPay = im + pm;
+        }
       } else {
-        pm = eqPrinM;
+        pm = eqM;
+        if (k === n || pm >= balM) pm = balM;
+        balM -= pm;
+        interest += im;
+        principal += pm;
+        monthlyPay = im + pm;
       }
-      if (k === n || pm >= balM) pm = balM;
-      balM -= pm;
-      interest += im;
-      principal += pm;
-      monthlyPay = im + pm;
     }
 
     // --- ボーナス返済部分 ---
@@ -132,15 +180,30 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
       bonusPay = ib + pb;
     }
 
+    // --- 繰上返済（この回の返済の後） ---
+    for (const x of prepays.get(k) ?? []) {
+      const amt = Math.min(x.amount, balM);
+      if (amt <= 0) continue;
+      balM -= amt;
+      out.prepaid[k - 1] += amt;
+      out.totalPrepaid += amt;
+      principal += amt;
+      if (x.mode === 'reduce') {
+        recalc = true;
+        if (spec.method !== 'annuity') eqM = Math.floor(balM / Math.max(1, n - k));
+      }
+    }
+
     out.monthly[k - 1] = monthlyPay;
     out.bonus[k - 1] = bonusPay;
     out.interest[k - 1] = interest;
     out.principalPaid[k - 1] = principal;
-    out.balance[k - 1] = balM + balB;
+    out.balance[k - 1] = balM + balB + unpaid;
     out.totalPayment += monthlyPay + bonusPay;
     out.totalInterest += interest;
     out.totalPrincipal += principal;
     if (monthlyPay > out.maxMonthly) out.maxMonthly = monthlyPay;
+    if (balM + balB + unpaid <= 0 && out.lastK === n && k < n) out.lastK = k;
   }
   out.firstMonthly = out.monthly[0];
   return out;

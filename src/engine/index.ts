@@ -38,8 +38,8 @@ export function computeAll(data: AppData): Computed {
       sim = rec.sim;
       basis = '適正予算で購入';
     }
-    // 同じ購入・同じ条件で、項目ごとの内訳を記録しながら計算し直す（結果の数値は同じ）
-    const detailed = simulate(resolved, sim.purchase, ctx.sc.base, { detail: true });
+    // 同じ購入・同じ条件で、項目ごとの内訳を記録しながら計算し直す（売却の予定はここでだけ反映。予算の計算では売却を当てにしない）
+    const detailed = simulate(resolved, sim.purchase, ctx.sc.base, { detail: true, sale: true });
     fp = { sim: detailed, years: toYears(detailed), basis };
   }
   return { resolved, rec, houses, fp };

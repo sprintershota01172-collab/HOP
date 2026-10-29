@@ -26,6 +26,8 @@ export interface Person {
   bonusNetAnnual: Yen | null;
   /** 賞与を12か月に均して毎月の収入として計算する（受け取りは年2回でも、家計で月々に割って使う場合） */
   bonusSpread?: boolean;
+  /** 定年後の再雇用（退職年齢から untilAge 歳になるまで、手取り月収 netMonthly） */
+  rehire?: { untilAge: number; netMonthly: Yen } | null;
   /** 額面年収（賞与込み）。審査目安・年金推計・税額推計に使う */
   grossAnnual: Yen | null;
   /** 昇給率（名目・年）。毎年4月に反映 */
@@ -201,11 +203,26 @@ export interface LoanTerms {
   /** 審査目安に使う金利 */
   screeningRate: Rate;
   borrower: 'self' | 'pair';
+  /** 変動金利の5年ルール・125%ルールを使う（多くの銀行の変動金利） */
+  rule125?: boolean;
+  /** 繰上返済の予定 */
+  prepayments?: Prepayment[];
+}
+
+export interface Prepayment {
+  id: ID;
+  /** 繰上返済する月 */
+  ym: YM;
+  amount: Yen;
+  /** shorten = 期間短縮（毎月の返済は同じ）、reduce = 返済額軽減（期間は同じ） */
+  mode: 'shorten' | 'reduce';
 }
 
 export type EnergyClass = 'longlife' | 'zeh' | 'standard' | 'other';
 
 export interface HousingPlan {
+  /** 家の売却・住み替えの予定（FP画面の推移に反映。購入予算の計算では売却を当てにしない） */
+  sale?: { ym: YM; price: Yen | null; rentAfter: Yen } | null;
   /** 現在の家賃（駐車場など込み・月）。null=未設定 */
   rentMonthly: Yen | null;
   purchaseYM: YM | null;
@@ -342,6 +359,17 @@ export interface Pocket {
   free: Yen | null;
 }
 
+/** ym から手取りが変わる（その後は昇給率で増える） */
+export interface IncomeChange {
+  id: ID;
+  owner: Owner;
+  ym: YM;
+  netMonthly: Yen;
+  /** 賞与（手取り・年合計）。null = 変えない */
+  bonusNetAnnual: Yen | null;
+  note: string;
+}
+
 export interface Plan {
   /** 残高（現金・投資）を入力した時点。シミュレーションの開始月 */
   baseYM: YM;
@@ -351,6 +379,8 @@ export interface Plan {
   children: Child[];
   living: LivingItem[];
   pocket: Pocket;
+  /** 収入が途中で変わる予定（転職・昇進など） */
+  incomeChanges: IncomeChange[];
   /** 毎月の貯金（先取り。預金として現金に残す）。null = 未設定 */
   saving: { monthly: Yen | null; bonus: Yen | null };
   insurances: Insurance[];

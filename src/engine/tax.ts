@@ -29,6 +29,29 @@ export function estimateDeductibleTax(gross: Yen): Yen {
   return Math.max(0, Math.floor(it + resident));
 }
 
+/** 課税所得の概算（給与所得控除・社会保険料15%・基礎控除58万円） */
+function taxableOf(gross: Yen): Yen {
+  let kyuyo: number;
+  if (gross <= 1_900_000) kyuyo = 650_000;
+  else if (gross <= 3_600_000) kyuyo = gross * 0.3 + 80_000;
+  else if (gross <= 6_600_000) kyuyo = gross * 0.2 + 440_000;
+  else if (gross <= 8_500_000) kyuyo = gross * 0.1 + 1_100_000;
+  else kyuyo = 1_950_000;
+  return Math.max(0, gross - kyuyo - gross * 0.15 - 580_000);
+}
+
+/**
+ * iDeCo などの所得控除で軽くなる税の割合（所得税の限界税率×1.021＋住民税10%）。
+ * 課税所得が0なら0（控除しても税は減らない）
+ */
+export function marginalTaxRate(gross: Yen): number {
+  if (gross <= 0) return 0;
+  const t = taxableOf(gross);
+  if (t <= 0) return 0;
+  const it = t <= 1_950_000 ? 0.05 : t <= 3_300_000 ? 0.1 : t <= 6_950_000 ? 0.2 : t <= 9_000_000 ? 0.23 : t <= 18_000_000 ? 0.33 : t <= 40_000_000 ? 0.4 : 0.45;
+  return it * 1.021 + 0.1;
+}
+
 export function deductionLimit(energy: EnergyClass, family: 'kosodate' | 'normal'): { limit: Yen; years: number } {
   const row = DEDUCTION.limits[energy];
   return { limit: row[family], years: row.years };

@@ -1,4 +1,4 @@
-import { incomeOf, spendOf, type PartCat, type SimResult } from './simulate';
+import { homeValueAt, incomeOf, spendOf, type PartCat, type SimResult } from './simulate';
 import type { Yen } from './types';
 import { ymYear } from './ym';
 
@@ -81,12 +81,8 @@ export function toYears(sim: SimResult): YearRow[] {
     cur.cashEnd = r.cash + r.fund;
     cur.investEnd = r.invest;
     cur.loanEnd = r.loanBalance;
-    if (p && r.ym >= p.ym) {
-      const yearsOwned = (r.ym - p.ym) / 12;
-      const life = p.house.kind === 'mansion' ? 47 : 30;
-      const bldg = p.house.buildingPrice * Math.max(0.1, 1 - yearsOwned / life);
-      cur.homeValue = Math.round(p.house.landPrice + bldg);
-    } else cur.homeValue = 0;
+    if (p && r.ym >= p.ym && (sim.soldYM == null || r.ym < sim.soldYM)) cur.homeValue = homeValueAt(p.house, (r.ym - p.ym) / 12);
+    else cur.homeValue = 0;
     cur.netWorth = cur.cashEnd + cur.investEnd + cur.homeValue - cur.loanEnd;
   }
   return out;
@@ -126,6 +122,10 @@ export interface DetailRow {
   props?: Record<string, string>;
   /** 一時的な支出・収入を12か月で平均したもの */
   once?: boolean;
+  /** 年の途中から（まで）の項目: 「11月から」など */
+  span?: string;
+  /** span がある場合の、その期間の月額 */
+  perMonth?: Yen;
 }
 /** fundPaid: その年に積立から払った支出（年の合計） */
 export type PieDetail = Record<PieSlice['key'], DetailRow[]> & { fundPaid: DetailRow[] };
@@ -156,10 +156,25 @@ function detailOf(sim: SimResult, idx: number[], y: YearRow): PieDetail {
   const sums = new Map<PartCat, DetailRow[]>();
   for (const pt of parts) {
     let v = 0;
-    for (const i of idx) v += pt.v[i];
+    const act: number[] = [];
+    for (const i of idx) {
+      v += pt.v[i];
+      if (Math.abs(pt.v[i]) >= 0.5) act.push(i);
+    }
     if (Math.abs(v) < 0.5) continue;
+    const row: DetailRow = { key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once };
+    // 毎月の項目が、選んだ期間の途中から始まる（途中で終わる）場合は、その月額も示す
+    if (!pt.once && act.length > 0 && act.length < idx.length && act[act.length - 1] - act[0] + 1 === act.length) {
+      const mon = (i: number) => (sim.rows[i].ym % 12) + 1;
+      const starts = act[0] !== idx[0];
+      const ends = act[act.length - 1] !== idx[idx.length - 1];
+      if (starts !== ends) {
+        row.span = starts ? `${mon(act[0])}月から` : `${mon(act[act.length - 1])}月まで`;
+        row.perMonth = Math.round(v / act.length);
+      }
+    }
     const list = sums.get(pt.cat) ?? [];
-    list.push({ key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once });
+    list.push(row);
     sums.set(pt.cat, list);
   }
   const fit = (rows: DetailRow[] | undefined, total: Yen): DetailRow[] => {

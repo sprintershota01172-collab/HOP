@@ -627,3 +627,4 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .tile .badge { margin: 0; }
 .legend .li .badge { margin-right: 6px; }
 .legend button.li { grid-template-columns: minmax(0, 1fr) auto; }
+.wf .ln .v .once.span { color: var(--green-2); background: var(--green-soft); }

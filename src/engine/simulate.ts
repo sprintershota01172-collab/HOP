@@ -1,7 +1,7 @@
 import { buildSchedule, ratePath, type LoanSchedule } from './loan';
 import { ASSUME, CHILD_ALLOWANCE, EDU_MEXT, EDU_UNIV, LEAVE } from './reference';
 import type { Resolved, RPerson } from './resolve';
-import { deductionLimit, estimateDeductibleTax, estimatePropertyTax } from './tax';
+import { deductionLimit, estimateDeductibleTax, estimatePropertyTax, marginalTaxRate } from './tax';
 import type { Child, EnergyClass, Investment, LoanTerms, Rate, Yen, YM } from './types';
 import { ageAt, elemStartFY, firstMarchAfterAge, gradeAt, toYM, ymMonth, ymYear } from './ym';
 
@@ -118,7 +118,17 @@ export interface SimResult {
   retireIndex: number;
   /** 項目ごとの金額（detail を指定したときだけ） */
   parts?: Part[];
+  /** 家を売却した月（sale を指定し、売却の予定があるときだけ） */
+  soldYM?: YM;
 }
+
+/** 家の参考評価額（土地はそのまま、建物は耐用年数で減る。最低1割） */
+export function homeValueAt(house: HouseModel, years: number): Yen {
+  const life = house.kind === 'mansion' ? 47 : 30;
+  return Math.round(house.landPrice + house.buildingPrice * Math.max(0.1, 1 - years / life));
+}
+/** 売却時の費用（仲介手数料・登記など）の目安 */
+export const SALE_COST_RATE = 0.04;
 
 export const incomeOf = (r: MonthRow): Yen =>
   r.salary + r.bonus + r.benefit + r.pension + r.allowance + r.otherIncome + r.retireBonus + r.deduction + r.gift;
@@ -234,9 +244,28 @@ export function childAllowance(children: Child[], m: YM): Yen {
 }
 
 /** 本人の勤労収入（給与・給付）と、その月の勤務割合 */
+/** その月の基本の手取り月収・賞与（収入の変化の予定と昇給率を反映） */
+export function baseIncome(r: Resolved, p: RPerson, m: YM): { net: number; bonus: number } {
+  let from = r.start, net = p.net, bonus = p.bonus;
+  let bonusFrom = r.start;
+  for (const c of p.changes) {
+    if (c.ym > m) break;
+    from = c.ym;
+    net = c.net;
+    if (c.bonus != null) {
+      bonus = c.bonus;
+      bonusFrom = c.ym;
+    }
+  }
+  return { net: net * Math.pow(1 + p.raise, aprilsBetween(from, m)), bonus: bonus * Math.pow(1 + p.raise, aprilsBetween(bonusFrom, m)) };
+}
+
 function workIncome(r: Resolved, p: RPerson, m: YM): { salary: number; benefit: number; ratio: number } {
-  if (p.net <= 0 || m >= p.retireYM) return { salary: 0, benefit: 0, ratio: 0 };
-  const base = p.net * Math.pow(1 + p.raise, aprilsBetween(r.start, m));
+  // 定年後の再雇用（給付・時短の対象外。手取りは入力した額のまま）
+  if (m >= p.retireYM) return p.rehire && m < p.rehire.untilYM ? { salary: p.rehire.net, benefit: 0, ratio: 1 } : { salary: 0, benefit: 0, ratio: 0 };
+  if (p.net <= 0 && !p.changes.length) return { salary: 0, benefit: 0, ratio: 0 };
+  const base = baseIncome(r, p, m).net;
+  if (base <= 0) return { salary: 0, benefit: 0, ratio: 0 };
   const plan = r.plan;
   const benefitsOn = plan.assumptions.leaveBenefits;
   let ratio = 1;
@@ -391,14 +420,15 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
       if (hist.length > 6) hist.shift();
       salary += w.salary;
       benefit += w.benefit;
-      rec?.add(i, 'income', `salary:${p.id}`, `${p.name}の給与`, w.salary, { sheet: 'income', work: true });
+      rec?.add(i, 'income', `salary:${p.id}`, m >= p.retireYM ? `${p.name}の再雇用の給与` : `${p.name}の給与`, w.salary, { sheet: 'income', work: true });
       rec?.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true });
       const spread = !!plan[p.id === 'self' ? 'self' : 'spouse']?.bonusSpread;
-      if ((spread || mon === 6 || mon === 12) && p.bonus > 0 && m < p.retireYM) {
+      const bonusNow = m < p.retireYM ? baseIncome(r, p, m).bonus : 0;
+      if ((spread || mon === 6 || mon === 12) && bonusNow > 0) {
         const window = [...hist];
         while (window.length < 6) window.unshift(1);
         const avg = window.reduce((s, v) => s + v, 0) / 6;
-        const b = (p.bonus / (spread ? 12 : 2)) * Math.pow(1 + p.raise, aprilsBetween(r.start, m)) * avg;
+        const b = (bonusNow / (spread ? 12 : 2)) * avg;
         bonus += b;
         rec?.add(i, 'income', `bonus:${p.id}`, spread ? `${p.name}の賞与（月々に分けて）` : `${p.name}の賞与`, b, { sheet: 'income', work: true });
       }
@@ -528,8 +558,9 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
  * すべての金額は各月の項目ごとに円単位へ丸めてから足し合わせるため、
  * 月次 → 年次の集計と残高の増減は円単位で一致する。
  */
-export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, opts?: { detail?: boolean }): SimResult {
+export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, opts?: { detail?: boolean; sale?: boolean }): SimResult {
   const plan = r.plan;
+  const sale = opts?.sale && purchase && plan.housing.sale && plan.housing.sale.ym > purchase.ym ? plan.housing.sale : null;
   const rec = opts?.detail ? new Parts(r.end - r.start + 1) : undefined;
   const a = plan.assumptions;
   const rm = Math.pow(1 + sc.returnRate, 1 / 12) - 1;
@@ -573,6 +604,8 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
         stressDelta: sc.rateDelta,
         rampMonths: ASSUME.rampMonths,
       }),
+      rule125: t.rule125 && t.rateType !== 'fixed',
+      prepay: (t.prepayments ?? []).map((x) => ({ k: x.ym - purchase.ym, amount: x.amount, mode: x.mode })),
     });
     // 住宅ローン控除（年末残高 × 0.7%、税額の範囲内）を翌年3月に受け取る
     const d = plan.housing.deduction;
@@ -598,6 +631,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
 
   const pre = prepare(r, sc.inflationDelta, rec);
   const nisaYear = new Map<string, { y: number; ts: number; gr: number }>();
+  const idecoYear = new Map<string, number>();
   const hp = plan.housing;
   const reserveMonths = a.reserveMonths;
   const taxByYear: number[] = [];
@@ -639,9 +673,13 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
     // ---------- 住まい ----------
     let upkeep = 0;
     const rentEnd = purchase ? purchase.ym + Math.max(0, hp.overlapMonths) : Infinity;
+    const sold = !!sale && m > sale.ym;
     if (m < rentEnd) {
       row.rent = r.rent;
       rec?.add(i, 'housing', 'rent', '家賃', r.rent, { sheet: 'housing', props: { page: 'now' } });
+    } else if (sold) {
+      row.rent = Math.round(sale!.rentAfter * f);
+      rec?.add(i, 'housing', 'rentAfter', '売却後の家賃', row.rent, { sheet: 'sale' });
     }
     if (purchase) {
       const hm = purchase.house;
@@ -654,7 +692,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
           rec.add(i, 'income', 'gift', '親などからの援助', hp.gift, { sheet: 'housing', props: { page: 'plan' }, once: true });
         }
       }
-      if (m > purchase.ym) {
+      if (m > purchase.ym && !sold) {
         const yi = Math.floor((m - purchase.ym - 1) / 12);
         if (taxByYear[yi] === undefined) {
           taxByYear[yi] = hm.propertyTaxAnnual ?? estimatePropertyTax(
@@ -672,7 +710,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
           rec.add(i, 'housing', 'parking', '駐車場', hm.parkingMonthly, cost);
         }
       }
-      if (schedule) {
+      if (schedule && !sold) {
         const k = m - purchase.ym;
         if (k >= 1 && k <= schedule.months) {
           row.loanPayment = schedule.monthly[k - 1] + schedule.bonus[k - 1];
@@ -683,11 +721,27 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
           }
           row.loanInterest = schedule.interest[k - 1];
           row.loanBalance = schedule.balance[k - 1];
+          const pp = schedule.prepaid[k - 1];
+          if (pp > 0) {
+            row.housingOnce += pp;
+            rec?.add(i, 'housing', 'prepay', '繰上返済', pp, { sheet: 'loanTerms', props: { page: 'prepay' }, once: true });
+          }
         } else if (k < 1) {
           row.loanBalance = k === 0 ? purchase.loan : 0;
         }
       }
-      row.deduction = deductionByMarch.get(m) ?? 0;
+      row.deduction = sold ? 0 : deductionByMarch.get(m) ?? 0;
+      if (sale && m === sale.ym) {
+        const price = sale.price ?? homeValueAt(hm, (m - purchase.ym) / 12);
+        const net = Math.round(price * (1 - SALE_COST_RATE));
+        row.otherIncome += net;
+        rec?.add(i, 'income', 'sale', '家の売却（売却費用を引いた額）', net, { sheet: 'sale', once: true });
+        if (row.loanBalance > 0) {
+          row.housingOnce += row.loanBalance;
+          rec?.add(i, 'housing', 'payoff', '住宅ローンの一括返済', row.loanBalance, { sheet: 'sale', once: true });
+          row.loanBalance = 0;
+        }
+      }
       rec?.add(i, 'income', 'deduction', '住宅ローン控除', row.deduction, { sheet: 'housing', props: { page: 'tax' } });
     }
     row.upkeep = Math.round(upkeep);
@@ -726,6 +780,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
         s.basis += c;
         contrib += c;
         rec?.add(i, 'saving', x.id, x.name, c, { sheet: 'invEdit', props: { id: x.id } });
+        if (x.kind === 'ideco') idecoYear.set(x.owner, (idecoYear.get(x.owner) ?? 0) + c);
       }
       if (x.withdrawStartYM != null && m >= x.withdrawStartYM && x.withdrawMonthly > 0 && s.bal > 0) {
         if (m < s.unlockYM) {
@@ -741,6 +796,18 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
     row.contrib = contrib;
     row.withdraw = withdraw;
     row.gain = gain;
+    // iDeCo の掛金は全額が所得控除。その年の掛金 × 税率の分、12月（年末調整）に税が戻る
+    if (ymMonth(m) === 12 && idecoYear.size) {
+      for (const [owner, sum] of idecoYear) {
+        const who = r.people.find((q) => q.id === owner);
+        const refund = who && m < who.retireYM ? Math.floor(sum * marginalTaxRate(who.gross)) : 0;
+        if (refund > 0) {
+          row.otherIncome += refund;
+          rec?.add(i, 'income', `ideco:${owner}`, `${who!.name}のiDeCoの節税（年末調整）`, refund, { sheet: 'invest', once: true });
+        }
+      }
+      idecoYear.clear();
+    }
 
     // ---------- 現金 ----------
     const income = incomeOf(row);
@@ -794,6 +861,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
     pIndex: purchase ? purchase.ym - r.start : -1,
     retireIndex: Math.max(0, r.retireAllYM - r.start),
     parts,
+    soldYM: sale ? sale.ym : undefined,
   };
 }
 

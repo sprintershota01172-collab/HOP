@@ -1,16 +1,17 @@
 import type { ReactElement } from 'react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { Lever } from '../../engine/explain';
+import { buildSchedule, ratePath } from '../../engine/loan';
 import type { ViewModel } from '../../engine/view';
 import { emptyData, uid } from '../../engine/defaults';
 import { ASSUME, CHECKED, SOURCES } from '../../engine/reference';
 import type { Memo, MemoCategory } from '../../engine/types';
 import { nowYM } from '../../engine/ym';
 import { listBackups, type Backup } from '../../storage/db';
-import { copyText, saveFile } from '../../storage/platform';
+import { copyText, saveFile, shareFile } from '../../storage/platform';
 import { DataError, migrate, toExport } from '../../storage/schema';
 import { Money } from '../components/bits';
-import { MoneyField, NumField, Pager, Seg, Toggle, useFit, usePages } from '../components/fields';
+import { MoneyField, NumField, Pager, Seg, Toggle, useFit, usePages, YMField } from '../components/fields';
 import { Sheet, Steps } from '../components/Sheet';
 import { Switcher } from '../components/Switcher';
 import { pct, yen, ymText } from '../format';
@@ -390,19 +391,63 @@ export function FpBasisSheet({ close }: SheetProps) {
         {s.data.houses.slice(0, 4).map((x) => opt(h.fpBasis === 'house' && h.houseId === x.id, x.name || '名称未設定', x.price ? `物件 ${yen(x.price)}` : '価格未入力', () => pick('house', x.id), x.id))}
         {opt(h.fpBasis === 'none', '購入しない', '家賃のまま暮らす場合', () => pick('none'), 'n')}
       </div>
+      {h.fpBasis !== 'none' && (
+        <button className="item" onClick={() => s.open({ kind: 'sale' })}>
+          <span className="ic">
+            <Icon name="key" />
+          </span>
+          <div className="grow">
+            <div className="t">売却・住み替え</div>
+            <div className="micro">{h.sale ? `${ymText(h.sale.ym)}に売却・その後の家賃 月${yen(h.sale.rentAfter)}` : '予定なし'}</div>
+          </div>
+          <Icon name="right" />
+        </button>
+      )}
+    </Sheet>
+  );
+}
+
+/** 家の売却・住み替え（将来の家計の推移にだけ反映し、購入予算の計算では売却を当てにしない） */
+export function SaleSheet({ close }: SheetProps) {
+  const s = useStore();
+  const h = s.data.plan.housing;
+  const sale = h.sale ?? null;
+  const set = (fn: (x: NonNullable<typeof sale>) => void) =>
+    s.update((d) => {
+      const cur = d.plan.housing.sale ?? { ym: (d.plan.housing.purchaseYM ?? nowYM()) + 12 * 25, price: null, rentAfter: 100_000 };
+      fn(cur);
+      d.plan.housing.sale = cur;
+      d.sample = false;
+    });
+  return (
+    <Sheet title="売却・住み替え" onClose={close} preview foot={<button className="btn primary" onClick={close}>完了</button>}>
+      <Toggle label="家を売却する予定がある" value={!!sale} onChange={(v) => (v ? set(() => undefined) : s.update((d) => void (d.plan.housing.sale = null)))} />
+      {sale && (
+        <>
+          <div className="grid2">
+            <YMField label="売却の時期" nullable={false} value={sale.ym} onChange={(v) => v != null && set((x) => void (x.ym = v))} from={new Date().getFullYear()} to={new Date().getFullYear() + 60} />
+            <MoneyField label="売却価格" hint="空欄は参考評価額" value={sale.price} placeholder="参考評価額" onChange={(v) => set((x) => void (x.price = v))} />
+          </div>
+          <MoneyField label="売却後の家賃" hint="住み替え先・いまの価値" per="month" nullable={false} value={sale.rentAfter} onChange={(v) => set((x) => void (x.rentAfter = v ?? 0))} />
+          <div className="card flat micro" style={{ lineHeight: 1.6 }}>
+            売却の月に、売却価格から売却費用（4%）を引いた額が入り、ローンの残りを一括で返します。その後は維持費・ローンがなくなり、家賃を払います。売却益の税（居住用の3,000万円控除など）は計算に入れていません。
+          </div>
+          <div className="micro" style={{ lineHeight: 1.6 }}>この予定は「将来の家計」の推移にだけ反映します。住宅購入予算は、売却を当てにせずに計算します。</div>
+        </>
+      )}
     </Sheet>
   );
 }
 
 /* ---------- ローン条件 ---------- */
-export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how' }) {
+export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how' | 'prepay' }) {
   const s = useStore();
   const h = s.data.plan.housing;
   const t = h.loan;
   const spouse = s.data.plan.spouse;
   const set = (fn: (x: typeof t) => void) => s.update((d) => void (fn(d.plan.housing.loan), (d.sample = false)));
-  const pages = [{ value: 'who' as const, label: '借りる人・希望額' }, { value: 'rate' as const, label: '金利' }, { value: 'how' as const, label: '返し方' }];
-  const [page, setPage] = useState<'who' | 'rate' | 'how'>(initial ?? 'who');
+  const pages = [{ value: 'who' as const, label: '借りる人' }, { value: 'rate' as const, label: '金利' }, { value: 'how' as const, label: '返し方' }, { value: 'prepay' as const, label: '繰上返済' }];
+  const [page, setPage] = useState<'who' | 'rate' | 'how' | 'prepay'>(initial ?? 'who');
   const [dir, setDir] = useState(1);
   return (
     <>
@@ -441,10 +486,15 @@ export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how'
                 <NumField label="固定期間後の金利" unit="%" scale={100} nullable={false} value={t.afterRate} onChange={(v) => set((x) => void (x.afterRate = v ?? 0))} />
               </div>
             )}
+            {t.rateType !== 'fixed' && (
+              <Toggle label="5年ルール・125%ルール" hint="返済額の見直しは5年ごと、上がっても前の1.25倍まで（多くの銀行の変動金利）" value={!!t.rule125} onChange={(v) => set((x) => void (x.rule125 = v))} />
+            )}
             <div className="card flat micro" style={{ lineHeight: 1.7 }}>
               2026年10月の目安: 変動は低い銀行で1.04〜1.28%程度、フラット35（21〜35年）は3.83%で過去最高。変動・固定期間後の金利は、+1%（標準）・+2%（安心）上がっても返せるかを確かめます。（確認日 {CHECKED}）
             </div>
           </>
+        ) : page === 'prepay' ? (
+          <PrepaySection />
         ) : (
           <>
             <NumField label="返済期間" unit="年" nullable={false} min={5} max={50} value={t.years} onChange={(v) => set((x) => void (x.years = Math.round(v ?? 35)))} hint="完済80歳を超える分は短くして計算" />
@@ -459,9 +509,100 @@ export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how'
 }
 export const LoanTermsSheet = ({ close, props }: SheetProps) => (
   <Sheet title="ローンの条件" onClose={close} preview foot={<Done close={close} />}>
-    <LoanTermsSection initial={(props.page as 'who' | 'rate' | 'how') ?? (props.focus === 'desired' ? 'who' : 'rate')} />
+    <LoanTermsSection initial={(props.page as 'who' | 'rate' | 'how' | 'prepay') ?? (props.focus === 'desired' ? 'who' : 'rate')} />
   </Sheet>
 );
+
+/** 繰上返済の予定と、その効果（目指す予算の借入額で、金利が変わらない場合） */
+function PrepaySection() {
+  const s = useStore();
+  const h = s.data.plan.housing;
+  const t = h.loan;
+  const list = t.prepayments ?? [];
+  const loan = s.vm?.rec.final.loan ?? 0;
+  const pym = h.purchaseYM ?? s.vm?.purchaseYM ?? nowYM() + 12;
+  const eff = useMemo(() => {
+    if (!loan) return null;
+    const base = { principal: loan, months: t.years * 12, method: t.method, bonusShare: t.bonusShare, rateAt: ratePath(t.rateType, t.rate, { fixedYears: t.fixedYears, afterRate: t.afterRate }), rule125: t.rule125 };
+    const a = buildSchedule(base);
+    const b = buildSchedule({ ...base, prepay: list.map((x) => ({ k: x.ym - pym, amount: x.amount, mode: x.mode })) });
+    return { interest: a.totalInterest - b.totalInterest, months: a.lastK - b.lastK, first: a.firstMonthly };
+  }, [loan, t, pym, list]);
+  const add = () => {
+    const id = uid('pre');
+    s.update((d) => {
+      const l = d.plan.housing.loan;
+      l.prepayments = [...(l.prepayments ?? []), { id, ym: Math.max(pym + 12, nowYM() + 12) + 48, amount: 1_000_000, mode: 'shorten' }];
+      d.sample = false;
+    });
+    s.open({ kind: 'prepayEdit', props: { id } });
+  };
+  return (
+    <>
+      <div className="list">
+        {list.length === 0 && <div className="empty">ボーナスや貯金で、借入の一部を前倒しで返す予定を入れると、減る利息と完済の早まりを計算します</div>}
+        {list.slice(0, 3).map((x) => (
+          <button key={x.id} className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'prepayEdit', props: { id: x.id } })}>
+            <span className="ic">
+              <Icon name="coins" />
+            </span>
+            <div className="grow">
+              <div className="t">{ymText(x.ym)}</div>
+              <div className="micro">{x.mode === 'shorten' ? '期間短縮（毎月の返済は同じ）' : '返済額軽減（期間は同じ）'}</div>
+            </div>
+            <b className="num">{yen(x.amount)}</b>
+            <Icon name="right" size={16} />
+          </button>
+        ))}
+        {list.length > 3 && <div className="micro">ほか{list.length - 3}件</div>}
+      </div>
+      <button className="btn" onClick={add}>
+        <Icon name="plus" />
+        繰上返済を追加
+      </button>
+      {eff && list.length > 0 && (
+        <div className="card flat stack" style={{ gap: 4 }}>
+          <div className="row between">
+            <span className="micro">減る利息</span>
+            <b className="num pos">{yen(eff.interest)}</b>
+          </div>
+          <div className="row between">
+            <span className="micro">完済が早まる</span>
+            <b className="num">{eff.months > 0 ? `${Math.floor(eff.months / 12)}年${eff.months % 12 ? `${eff.months % 12}か月` : ''}` : 'なし（返済額が下がる）'}</b>
+          </div>
+          <div className="micro">借入 {yen(loan)}・金利が変わらない場合。繰上返済のお金は、その月の現金から払う計算です。</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export function PrepayEditSheet({ close, props }: SheetProps) {
+  const s = useStore();
+  const list = s.data.plan.housing.loan.prepayments ?? [];
+  const x = list.find((p) => p.id === props.id);
+  if (!x) return null;
+  const set = (fn: (p: NonNullable<typeof x>) => void) =>
+    s.update((d) => {
+      const p = (d.plan.housing.loan.prepayments ?? []).find((q) => q.id === x.id);
+      if (p) fn(p);
+      d.sample = false;
+    });
+  const del = () => {
+    s.update((d) => void (d.plan.housing.loan.prepayments = (d.plan.housing.loan.prepayments ?? []).filter((q) => q.id !== x.id)));
+    close();
+  };
+  return (
+    <Sheet title="繰上返済" onClose={close} preview short foot={<><button className="btn danger" onClick={del}><Icon name="trash" />削除</button><button className="btn primary" onClick={close}>完了</button></>}>
+      <div className="grid2">
+        <YMField label="いつ" nullable={false} value={x.ym} onChange={(v) => v != null && set((p) => void (p.ym = v))} from={new Date().getFullYear()} to={new Date().getFullYear() + 50} />
+        <MoneyField label="金額" nullable={false} value={x.amount} onChange={(v) => set((p) => void (p.amount = v ?? 0))} />
+      </div>
+      <Seg label="方法" value={x.mode} onChange={(v) => set((p) => void (p.mode = v))} options={[{ value: 'shorten', label: '期間短縮' }, { value: 'reduce', label: '返済額軽減' }]} />
+      <div className="micro" style={{ lineHeight: 1.6 }}>期間短縮は毎月の返済を変えずに完済を早め、利息がより減ります。返済額軽減は期間を変えずに毎月の返済を下げます。</div>
+    </Sheet>
+  );
+}
 
 /* ---------- メモ ---------- */
 export function MemoEditSheet({ close, props }: SheetProps) {
@@ -598,13 +739,16 @@ export function SettingsSheet({ close }: SheetProps) {
             <button
               className="btn"
               onClick={async () => {
+                // スマートフォンでは共有メニュー（LINE・AirDrop など）で配偶者に送れる。使えない環境ではファイルに保存
+                const sh = await shareFile(fname, json());
+                if (sh === 'shared' || sh === 'cancelled') return;
                 const r = await saveFile(fname, json());
                 if (r === 'saved') s.notify('ファイルに書き出しました');
                 else if (r === 'unavailable') setExportText(json());
               }}
             >
               <Icon name="download" />
-              書き出す
+              書き出す・送る
             </button>
             <button
               className="btn"

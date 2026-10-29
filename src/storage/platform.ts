@@ -106,3 +106,20 @@ export async function copyText(text: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * データをファイルで相手に送る（スマートフォンの共有メニュー: LINE・AirDrop・メールなど）。
+ * 共有メニューが使えない環境では 'unavailable'
+ */
+export async function shareFile(filename: string, text: string): Promise<'shared' | 'cancelled' | 'unavailable'> {
+  try {
+    const nav = navigator as Navigator & { canShare?: (d: unknown) => boolean; share?: (d: unknown) => Promise<void> };
+    if (!nav.share || !nav.canShare || isFramed()) return 'unavailable';
+    const file = new File([text], filename, { type: 'application/json' });
+    if (!nav.canShare({ files: [file] })) return 'unavailable';
+    await nav.share({ files: [file], title: 'ほっぽさんのデータ' });
+    return 'shared';
+  } catch (e) {
+    return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'unavailable';
+  }
+}
