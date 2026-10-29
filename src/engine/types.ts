@@ -24,6 +24,8 @@ export interface Person {
   netMonthly: Yen | null;
   /** 賞与の手取り（年合計）。6月・12月に半分ずつ */
   bonusNetAnnual: Yen | null;
+  /** 賞与を12か月に均して毎月の収入として計算する（受け取りは年2回でも、家計で月々に割って使う場合） */
+  bonusSpread?: boolean;
   /** 額面年収（賞与込み）。審査目安・年金推計・税額推計に使う */
   grossAnnual: Yen | null;
   /** 昇給率（名目・年）。毎年4月に反映 */
@@ -45,6 +47,10 @@ export interface Debt {
   endYM: YM;
   /** 決まった入力欄の借入（'car' = 自動車ローン） */
   std?: 'car';
+  /** ボーナス払い（1回あたり。6月・12月） */
+  bonus?: Yen;
+  /** ボーナス払いを月々に割って計算する（年2回分 ÷ 12 を毎月） */
+  bonusSplit?: boolean;
 }
 
 export type SchoolChoice = 'public' | 'private';
@@ -345,6 +351,8 @@ export interface Plan {
   children: Child[];
   living: LivingItem[];
   pocket: Pocket;
+  /** 毎月の貯金（先取り。預金として現金に残す）。null = 未設定 */
+  saving: { monthly: Yen | null; bonus: Yen | null };
   insurances: Insurance[];
   investments: Investment[];
   goals: Goal[];

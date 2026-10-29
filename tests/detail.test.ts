@@ -211,3 +211,37 @@ describe('旅行などの逆算積立', () => {
     assert.ok(det[y].fundPaid.some((x) => x.label === '旅行' && x.value === 600_000));
   });
 });
+
+describe('ボーナスの扱い・毎月の貯金', () => {
+  const year = (sim: ReturnType<typeof simulate>, y: number, f: (x: (typeof sim.rows)[number]) => number) => sim.rows.filter((x) => Math.floor(x.ym / 12) === y).map(f);
+  it('賞与を「月々に割る」と、年の合計はほぼ同じまま毎月に均等に入る', () => {
+    const d = household({ spouse: false });
+    const spread = withPlan(d, (p) => void (p.self.bonusSpread = true));
+    const a = year(baseSim(d).sim, 2027, (x) => x.bonus);
+    const b = year(baseSim(spread).sim, 2027, (x) => x.bonus);
+    assert.equal(a.filter((v) => v > 0).length, 2);
+    assert.equal(b.filter((v) => v > 0).length, 12);
+    const sa = a.reduce((t, v) => t + v, 0), sb = b.reduce((t, v) => t + v, 0);
+    assert.ok(Math.abs(sa - sb) / sa < 0.01, `${sa} ≈ ${sb}`);
+  });
+  it('借入のボーナス払い: 6・12月に払うか、月々に割るかを選べる（年の合計は同じ）', () => {
+    const mk = (split: boolean) => withPlan(household(), (p) => void p.debts.push({ id: uid(), name: '自動車ローン', monthly: 20_000, endYM: toYM(2030, 12), std: 'car', bonus: 60_000, bonusSplit: split }));
+    const a = year(baseSim(mk(false)).sim, 2027, (x) => x.debt);
+    const b = year(baseSim(mk(true)).sim, 2027, (x) => x.debt);
+    assert.deepEqual([a[0], a[5]], [20_000, 80_000]);
+    assert.ok(b.every((v) => v === 30_000));
+    assert.equal(a.reduce((t, v) => t + v, 0), b.reduce((t, v) => t + v, 0));
+  });
+  it('毎月の貯金: 円グラフの「貯蓄・投資」に入り、預金として現金に残る（現金の推移は変わらない）', () => {
+    const d = household();
+    const s = withPlan(d, (p) => void (p.saving = { monthly: 30_000, bonus: 100_000 }));
+    const a = baseSim(d).sim, b = baseSim(s).sim;
+    assert.deepEqual(b.rows.map((x) => x.cash), a.rows.map((x) => x.cash));
+    const y = year(b, 2027, (x) => x.saveIn);
+    assert.equal(y.reduce((t, v) => t + v, 0), 30_000 * 12 + 100_000 * 2);
+    const c = computeAll(s);
+    const det = pieDetails(c.fp!.sim, c.fp!.years);
+    assert.ok(det[1].saving.some((x) => x.label === '毎月の貯金' && x.value === 30_000));
+    assert.equal(computeAll(s).rec.final.total, computeAll(d).rec.final.total, '貯金の設定で予算は変わらない（使わずに残すお金のため）');
+  });
+});

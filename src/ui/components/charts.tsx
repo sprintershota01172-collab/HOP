@@ -176,6 +176,59 @@ export function AssetChart({ years, year, onPick }: { years: YearRow[]; year: nu
   );
 }
 
+/** 1年分の月末の資産（棒: 現金・目的別の積立・投資）。ローン残高は数字で表示。タップで月を選ぶ */
+export function MonthAssetChart({ months, sel, onPick }: { months: { ym: number; cash: number; fund: number; invest: number; loan: number }[]; sel: number; onPick: (i: number) => void }) {
+  const { ref, w, h } = useSize<HTMLDivElement>();
+  const pad = { l: 46, r: 4, t: 6, b: 16 };
+  const iw = Math.max(1, w - pad.l - pad.r);
+  const ih = Math.max(1, h - pad.t - pad.b);
+  const top = (m: (typeof months)[number]) => Math.max(0, m.cash) + m.fund + m.invest;
+  const max = Math.max(1, ...months.map((m) => top(m)));
+  const min = Math.min(0, ...months.map((m) => m.cash));
+  const span = max - min || 1;
+  const bw = iw / Math.max(1, months.length);
+  const X = (i: number) => pad.l + i * bw + bw / 2;
+  const Y = (v: number) => pad.t + ((max - v) / span) * ih;
+  const ticks = niceTicks(min, max);
+  const bar = (i: number, lo: number, hi: number, fill: string) =>
+    hi > lo ? <rect x={X(i) - bw * 0.34} width={bw * 0.68} y={Y(hi)} height={Math.max(0.5, Y(lo) - Y(hi))} fill={fill} rx="1.5" /> : null;
+  return (
+    <div ref={ref} style={{ flex: 1, minHeight: 0 }}>
+      {w > 0 && h > 0 && months.length > 0 && (
+        <svg className="chart" width={w} height={h} role="img" aria-label="月ごとの資産の推移"
+          onClick={(e: MouseEvent) => {
+            const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
+            const i = Math.floor((e.clientX - rect.left - pad.l) / bw);
+            if (i >= 0 && i < months.length) onPick(i);
+          }}
+        >
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={pad.l} x2={w - pad.r} y1={Y(t)} y2={Y(t)} stroke="var(--line)" strokeWidth={t === 0 ? 1.2 : 0.6} />
+              <text x={pad.l - 4} y={Y(t) + 3} textAnchor="end">{short(t)}</text>
+            </g>
+          ))}
+          {sel >= 0 && sel < months.length && <rect x={X(sel) - bw / 2} width={bw} y={pad.t} height={ih} fill="var(--surface-2)" />}
+          {months.map((m, i) => {
+            const c = Math.max(0, m.cash);
+            return (
+              <g key={m.ym} opacity={sel === i ? 1 : 0.8}>
+                {m.cash < 0 && bar(i, m.cash, 0, 'var(--red)')}
+                {bar(i, 0, c, 'var(--green-2)')}
+                {bar(i, c, c + m.fund, 'var(--warn)')}
+                {bar(i, c + m.fund, c + m.fund + m.invest, 'var(--c-save)')}
+              </g>
+            );
+          })}
+          {months.map((m, i) => (
+            <text key={m.ym} x={X(i)} y={h - 3} textAnchor="middle" fontWeight={sel === i ? 700 : 400}>{(m.ym % 12) + 1}</text>
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
 function niceTicks(min: number, max: number): number[] {
   const span = max - min;
   if (span <= 0) return [0];

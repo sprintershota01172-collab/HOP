@@ -102,6 +102,7 @@ export function emptyPlan(baseYM: number): Plan {
     children: [],
     living: [],
     pocket: { self: null, spouse: null, free: null },
+    saving: { monthly: null, bonus: null },
     insurances: [],
     investments: [],
     goals: [],
@@ -175,6 +176,7 @@ export function sampleData(baseYM: number): AppData {
     ['医療費', 5_000], ['被服費', 10_000], ['娯楽費', 15_000], ['旅行', 15_000], ['その他', 10_000],
   ];
   p.pocket = { self: 20_000, spouse: 20_000, free: null };
+  p.saving = { monthly: 30_000, bonus: 100_000 };
   p.living = living.map(([name, monthly]): LivingItem => {
     const std = LIVING_STD.find((x) => x.name === name);
     if (std) return { id: uid('liv'), name, icon: std.icon, monthly, kind: std.kind, std: std.std };

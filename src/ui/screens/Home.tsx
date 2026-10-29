@@ -3,7 +3,8 @@ import { Ruler } from '../components/charts';
 import { Kpi, TierChip } from '../components/bits';
 import { useFit } from '../components/fields';
 import { yen } from '../format';
-import { Icon, RoofMark } from '../icons';
+import { Icon } from '../icons';
+import { Mascot, MascotSays } from '../Mascot';
 import { useStore } from '../store';
 import { startNewHouse } from '../sheets/house';
 import { emptyData } from '../../engine/defaults';
@@ -41,11 +42,11 @@ export function Home() {
       <div className="screen">
         <SampleBanner />
         <div className="card hero">
-          <RoofMark />
           <div className="label">あなたの適正住宅予算</div>
           <div className="hero-amount" style={{ fontSize: 'var(--fs-xl)', fontWeight: 800 }}>
             入力が必要です
           </div>
+          <MascotSays text="収入・貯金・生活費を入れると、無理のない予算を計算するっぽ！" />
           <div className="micro">足りない項目</div>
           <div className="chips">
             {vm.blocking.map((b) => (
@@ -73,9 +74,9 @@ export function Home() {
     <div className="screen">
       <SampleBanner />
       <div className="card hero">
-        <RoofMark />
+        <Mascot className="hero-mascot" size={64} mood={!t.standard.ok ? 'worry' : vm.loanBase && (vm.loanBase.tier === 'caution' || vm.loanBase.tier === 'danger') ? 'worry' : 'happy'} />
         <div className="row">
-          <span className="label">あなたの住宅購入予算</span>
+          <span className="label">🏠 あなたの住宅購入予算</span>
           <button className="chip" style={{ marginLeft: 'auto', position: 'relative' }} onClick={() => s.open({ kind: 'basis' })} aria-label="計算の内訳を見る">
             <Icon name="info" />
             計算の内訳・信頼度 {vm.confidence.level}
@@ -130,10 +131,10 @@ export function Home() {
 
       {m && (
         <div className="card kpis">
-          <Kpi label="総返済額" v={m.totalPayment} sub={`うち利息 ${yen(m.totalInterest)}`} />
-          <Kpi label="毎月の住宅関連支出" v={m.monthlyHousing} sub={`うち返済 ${yen(m.loanMonthly)}`} />
-          <Kpi label="購入後の生活余力（月）" v={m.surplus5y} sign sub="購入後5年の平均" />
-          <Kpi label="貯蓄（現金＋投資）" v={m.savingsNow} sub={<>10年後 {yen(m.savings10y)}</>} />
+          <Kpi label="💰 総返済額" v={m.totalPayment} sub={`うち利息 ${yen(m.totalInterest)}`} />
+          <Kpi label="🏠 毎月の住宅関連支出" v={m.monthlyHousing} sub={`うち返済 ${yen(m.loanMonthly)}`} />
+          <Kpi label="😊 購入後の生活余力（月）" v={m.surplus5y} sign sub="購入後5年の平均" />
+          <Kpi label="🐷 貯蓄（現金＋投資）" v={m.savingsNow} sub={<>10年後 {yen(m.savings10y)}</>} />
         </div>
       )}
 

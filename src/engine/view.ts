@@ -62,6 +62,19 @@ export interface LoanView {
   years: number;
 }
 
+/** 月末の資産（月ごとの資産の推移） */
+export interface MonthAsset {
+  ym: YM;
+  cash: Yen;
+  /** 現金のうち先取りで貯金した累計（現金を下回る場合は現金まで） */
+  saved: Yen;
+  fund: Yen;
+  invest: Yen;
+  loan: Yen;
+  /** その月の現金の増減 */
+  delta: Yen;
+}
+
 export interface ViewModel {
   ready: boolean;
   blocking: string[];
@@ -89,7 +102,7 @@ export interface ViewModel {
   houses: HouseView[];
   /** 自己資金の算出に使った値 */
   downInfo: { cashBefore: Yen; needWithRent: Yen; gift: Yen; moving: Yen } | null;
-  fp: { basis: string; years: YearRow[]; pies: { year: number; income: Yen; slices: PieSlice[]; withdraw: Yen; detail: PieDetail }[]; goals: GoalStatus[]; warnings: SimWarning[] } | null;
+  fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; income: Yen; slices: PieSlice[]; withdraw: Yen; detail: PieDetail }[]; goals: GoalStatus[]; warnings: SimWarning[] } | null;
   ms: number;
 }
 
@@ -130,6 +143,15 @@ export function computeView(data: AppData): ViewModel {
     ? {
         basis: c.fp.basis,
         years: c.fp.years,
+        months: c.fp.sim.rows.map((x, i, rows) => ({
+          ym: x.ym,
+          cash: x.cash,
+          saved: Math.max(0, Math.min(x.saved, x.cash)),
+          fund: x.fund,
+          invest: x.invest,
+          loan: x.loanBalance,
+          delta: x.cash + x.fund - (i ? rows[i - 1].cash + rows[i - 1].fund : x.cash + x.fund),
+        })),
         pies: ((details) => c.fp!.years.map((y, i) => ({ year: y.year, ...monthPie(y), detail: details[i] })))(pieDetails(c.fp.sim, c.fp.years)),
         goals: goalStatus(data.plan.goals, c.fp.sim),
         warnings: c.fp.sim.warnings,

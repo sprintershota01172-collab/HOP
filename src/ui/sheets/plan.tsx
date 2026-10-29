@@ -18,6 +18,7 @@ import { Switcher } from '../components/Switcher';
 import { pct, yen, ymText } from '../format';
 import { EVENT_ICONS, Icon, LIVING_ICONS } from '../icons';
 import { useStore } from '../store';
+import { LIVING_EMOJI } from '../emoji';
 
 export type SheetProps = { close: () => void; props: Record<string, unknown> };
 
@@ -103,7 +104,10 @@ export function IncomeSection() {
                     <MoneyField label="賞与（手取り・年合計）" per="year" value={person.bonusNetAnnual} onChange={(v) => set((x) => void (x.bonusNetAnnual = v))} />
                     <MoneyField label="額面年収（賞与込み）" hint="審査の目安・年金の推計" per="year" value={person.grossAnnual} onChange={(v) => set((x) => void (x.grossAnnual = v))} />
                   </div>
-                  <NumField label="昇給率（年）" unit="%" scale={100} value={person.raiseRate} onChange={(v) => set((x) => void (x.raiseRate = v))} hint="未入力は物価上昇率と同じ" />
+                  <div className="grid2">
+                    <NumField label="昇給率（年）" unit="%" scale={100} value={person.raiseRate} onChange={(v) => set((x) => void (x.raiseRate = v))} hint="未入力は物価並み" />
+                    <Seg label="賞与の計算" value={person.bonusSpread ? 'split' : 'months'} onChange={(v) => set((x) => void (x.bonusSpread = v === 'split'))} options={[{ value: 'months', label: '6・12月' }, { value: 'split', label: '月々に割る' }]} />
+                  </div>
                 </>
               ) : (
                 <>
@@ -155,7 +159,11 @@ export function SavingsSection() {
         <MoneyField label={`${p.self.name || '本人'}の現金・預金`} required value={p.self.cash} onChange={(v) => up((pl) => void ((pl.self.cash = v), (pl.baseYM = nowYM())))} />
         {p.spouse && <MoneyField label={`${p.spouse.name || '配偶者'}の現金・預金`} required value={p.spouse.cash} onChange={(v) => up((pl) => void ((pl.spouse!.cash = v), (pl.baseYM = nowYM())))} />}
       </div>
-      <div className="micro">NISAなどの投資は「NISA・投資」に分けて入力します（現金と投資は別に計算）。残高を変えると今月からの計算になります（基準: {ymText(p.baseYM)}）。</div>
+      <div className="grid2">
+        <MoneyField label="🐷 毎月の貯金" hint="先取り" per="month" value={p.saving.monthly} placeholder="未設定" onChange={(v) => up((pl) => void (pl.saving = { ...pl.saving, monthly: v }))} />
+        <MoneyField label="🎁 ボーナス月の貯金" hint="1回あたり" value={p.saving.bonus} placeholder="未設定" onChange={(v) => up((pl) => void (pl.saving = { ...pl.saving, bonus: v }))} />
+      </div>
+      <div className="micro">貯金は預金として現金に残ります（円グラフでは「貯蓄・投資」、残額は使えるお金）。NISAなどは「NISA・投資」に分けて入力します。基準: {ymText(p.baseYM)}</div>
       <div className="label" style={{ fontWeight: 700 }}>
         いまある借入（車のローンなど）
       </div>
@@ -191,6 +199,7 @@ export function DebtEditSheet({ close, props }: SheetProps) {
         <MoneyField label="毎月の返済" per="month" nullable={false} value={d.monthly} onChange={(v) => set((x) => void (x.monthly = v ?? 0))} />
         <YMField label="返済の終わり" value={d.endYM} nullable={false} onChange={(v) => v != null && set((x) => void (x.endYM = v))} from={THIS_YEAR} to={THIS_YEAR + 40} />
       </div>
+      <DebtBonusFields d={d} set={set} />
     </Sheet>
   );
 }
@@ -350,6 +359,20 @@ export function LivingSection({ initial }: { initial?: 'base' | 'pocket' | 'car'
 /** 自動車ローン（以前の版で「車のローン」などの名前で入れた借入も同じものとして扱う） */
 const findCar = (ds: Debt[]) => ds.find((d) => d.std === 'car') ?? ds.find((d) => !d.std && /車|カー/.test(d.name));
 
+/** 借入のボーナス払い（1回あたり）と、月々に割って計算するか */
+function DebtBonusFields({ d, set }: { d: Debt; set: (fn: (x: Debt) => void) => void }) {
+  return (
+    <div className="grid2">
+      <MoneyField label="ボーナス払い" hint="1回あたり" value={d.bonus ?? null} placeholder="なし" onChange={(v) => set((x) => void (x.bonus = v ?? 0))} />
+      {(d.bonus ?? 0) > 0 ? (
+        <Seg label="払い方の計算" value={d.bonusSplit ? 'split' : 'months'} onChange={(v) => set((x) => void (x.bonusSplit = v === 'split'))} options={[{ value: 'months', label: '6・12月' }, { value: 'split', label: '月々に割る' }]} />
+      ) : (
+        <div />
+      )}
+    </div>
+  );
+}
+
 export function CarLoanSection() {
   const { s, p, up } = usePlan();
   const car = findCar(p.debts);
@@ -367,7 +390,7 @@ export function CarLoanSection() {
     <>
       <div className="grid2">
         <MoneyField
-          label="自動車ローン"
+          label="🚗 自動車ローン"
           hint="毎月の返済"
           per="month"
           value={car ? car.monthly : null}
@@ -376,8 +399,9 @@ export function CarLoanSection() {
         />
         {car ? <YMField label="返済の終わり" nullable={false} value={car.endYM} onChange={(v) => v != null && set((d) => void (d.endYM = v))} from={THIS_YEAR} to={THIS_YEAR + 15} /> : <div />}
       </div>
+      {car && <DebtBonusFields d={car} set={(fn) => set(fn)} />}
       <div className="micro" style={{ lineHeight: 1.6 }}>
-        ボーナス払いがある場合は、年間のボーナス払いの合計 ÷ 12 を毎月の返済に足して入力してください。ガソリン・保険・車検などは「生活費」の「そのほかの項目」に入れます。
+        ガソリン・保険・車検などは「生活費」の「そのほかの項目」に入れます。
       </div>
       <button className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'savings' })}>
         <span className="ic">
@@ -402,10 +426,10 @@ export function PocketSection() {
   return (
     <>
       <div className="grid2">
-        <MoneyField label={`${p.self.name || '本人'}のお小遣い`} per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
-        {p.spouse && <MoneyField label={`${p.spouse.name || '配偶者'}のお小遣い`} per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
+        <MoneyField label={`👛 ${p.self.name || '本人'}のお小遣い`} per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
+        {p.spouse && <MoneyField label={`👛 ${p.spouse.name || '配偶者'}のお小遣い`} per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
       </div>
-      <MoneyField label="自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
+      <MoneyField label="🎡 自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
       <div className="card flat row between">
         <span className="label">お小遣い・自由費の合計</span>
         <b className="num">月{yen(total)}</b>
@@ -450,9 +474,9 @@ function LivingBase() {
     <>
       <div className="grid2">
         {LIVING_STD.map((d) => (
-          <MoneyField key={d.std} label={d.name} per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
+          <MoneyField key={d.std} label={`${LIVING_EMOJI[d.std]} ${d.name}`} per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
         ))}
-        <MoneyField label="その他の生活費" hint="まとめて" per="month" value={lump ? lump.monthly : null} placeholder="未入力" onChange={setLump} />
+        <MoneyField label="🧺 その他の生活費" hint="まとめて" per="month" value={lump ? lump.monthly : null} placeholder="未入力" onChange={setLump} />
       </div>
       <button className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'livingItems' })}>
         <span className="ic">

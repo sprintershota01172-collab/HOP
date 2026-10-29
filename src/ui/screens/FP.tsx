@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import type { DetailRow, PieSlice } from '../../engine/aggregate';
 import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
-import { AssetChart, Donut, SLICE_COLOR, YearBars } from '../components/charts';
+import { AssetChart, Donut, MonthAssetChart, SLICE_COLOR, YearBars } from '../components/charts';
 import { Kpi, Money } from '../components/bits';
 import { useFit, usePages, useSwipe } from '../components/fields';
 import { Switcher } from '../components/Switcher';
 import { yen } from '../format';
 import { Icon } from '../icons';
+import { SLICE_EMOJI, TILE_EMOJI } from '../emoji';
+import { MascotSays } from '../Mascot';
 import { useStore } from '../store';
 import { Loading, SampleBanner } from './Home';
 
@@ -37,10 +39,7 @@ function NeedInput() {
   const s = useStore();
   return (
     <div className="empty fill">
-      <div>
-        {s.vm?.blocking.join('、')}
-        を入力すると、将来の家計を計算します
-      </div>
+      <MascotSays text={`${s.vm?.blocking.join('、')}を入れると、将来の家計を計算するっぽ！`} />
       <button className="btn primary" onClick={() => s.open({ kind: 'wizard' })}>
         かんたん入力
       </button>
@@ -131,7 +130,9 @@ function Result() {
                 {pie.slices.map((x) => (
                   <button className="li" key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
                     <i style={{ background: x.key === 'rest' && x.value < 0 ? 'var(--red)' : SLICE_COLOR[x.key] }} />
-                    <span className="ellipsis">{x.label}</span>
+                    <span className="ellipsis">
+                      {SLICE_EMOJI[x.key]} {x.label}
+                    </span>
                     <span className={`num ${x.key === 'rest' && x.value < 0 ? 'neg' : ''}`}>{yen(x.value)}</span>
                   </button>
                 ))}
@@ -150,10 +151,10 @@ function Result() {
         {view === 'year' && (
           <>
             <div className="grid2">
-              <Kpi label="収入" v={yr.income} />
-              <Kpi label="支出" v={yr.spend} />
-              <Kpi label="貯蓄・投資の積立" v={yr.contrib + yr.fund} />
-              <Kpi label="年間収支" v={yr.net} sign />
+              <Kpi label="💴 収入" v={yr.income} />
+              <Kpi label="🧾 支出" v={yr.spend} />
+              <Kpi label="🐷 貯金・積立・投資" v={yr.contrib + yr.fund + yr.save} />
+              <Kpi label="📊 年間収支" v={yr.net} sign />
             </div>
             <YearBars years={fp.years} year={year} onPick={setYear} retireYear={retireY} />
             {fp.goals.length > 0 && (
@@ -167,16 +168,47 @@ function Result() {
             )}
           </>
         )}
-        {view === 'asset' && (
+        {view === 'asset' && <Assets year={year} setYear={setYear} />}
+        </Switcher>
+      </div>
+    </>
+  );
+}
+
+/** 資産の推移（年ごと / 月ごと） */
+function Assets({ year, setYear }: { year: number; setYear: (y: number) => void }) {
+  const s = useStore();
+  const fp = s.vm!.fp!;
+  const [mode, setMode] = useState<'year' | 'month'>('year');
+  const yr = fp.years.find((y) => y.year === year)!;
+  const months = fp.months.filter((m) => Math.floor(m.ym / 12) === year);
+  const [mi, setMi] = useState<number | null>(null);
+  const idx = Math.min(months.length - 1, mi ?? months.length - 1);
+  const m = months[idx];
+  return (
+    <>
+      <div className="row between" style={{ flex: 'none' }}>
+        <div className="seg mini" role="group" aria-label="資産の推移の単位">
+          <button aria-pressed={mode === 'year' ? 'true' : 'false'} onClick={() => setMode('year')}>
+            年ごと
+          </button>
+          <button aria-pressed={mode === 'month' ? 'true' : 'false'} onClick={() => setMode('month')}>
+            月ごと
+          </button>
+        </div>
+        <span className="micro">{mode === 'year' ? `${year}年末` : m ? `${year}年${(m.ym % 12) + 1}月末` : ''}</span>
+      </div>
+      <Switcher k={mode} dir={mode === 'month' ? 1 : -1}>
+        {mode === 'year' ? (
           <>
             <div className="grid3">
-              <Kpi label="現金" v={yr.cashEnd} />
-              <Kpi label="投資" v={yr.investEnd} />
-              <Kpi label="純資産" v={yr.netWorth} />
-              <Kpi label="ローン残高" v={yr.loanEnd} tone="interest" />
-              <Kpi label="住宅（参考評価）" v={yr.homeValue} />
+              <Kpi label="💴 現金" v={yr.cashEnd} />
+              <Kpi label="📈 投資" v={yr.investEnd} />
+              <Kpi label="✨ 純資産" v={yr.netWorth} />
+              <Kpi label="🏦 ローン残高" v={yr.loanEnd} tone="interest" />
+              <Kpi label="🏠 住宅（参考評価）" v={yr.homeValue} />
               <div className="kpi">
-                <div className="label">運用益（年）</div>
+                <div className="label">🌱 運用益（年）</div>
                 <Money v={yr.gain} />
               </div>
             </div>
@@ -189,9 +221,28 @@ function Result() {
               <LegendDot c="var(--ink)" t="純資産" line />
             </div>
           </>
+        ) : m ? (
+          <>
+            <div className="grid3">
+              <Kpi label="💴 現金" v={m.cash} />
+              <Kpi label="🐷 うち貯金" v={m.saved} />
+              <Kpi label="✈️ 積立中" v={m.fund} />
+              <Kpi label="📈 投資" v={m.invest} />
+              <Kpi label="🏦 ローン残高" v={m.loan} tone="interest" />
+              <Kpi label="この月の増減" v={m.delta} sign />
+            </div>
+            <MonthAssetChart months={months} sel={idx} onPick={setMi} />
+            <div className="row micro" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <LegendDot c="var(--green-2)" t="現金" />
+              <LegendDot c="var(--warn)" t="目的別の積立" />
+              <LegendDot c="var(--c-save)" t="投資" />
+              <span>棒をタップで月を選べます</span>
+            </div>
+          </>
+        ) : (
+          <div className="empty fill">この年のデータがありません</div>
         )}
-        </Switcher>
-      </div>
+      </Switcher>
     </>
   );
 }
@@ -246,7 +297,7 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
     <div className="stack fill detail" style={{ gap: 2 }}>
       <div className="row" style={{ gap: 6 }}>
         <span className="label ellipsis grow" style={{ fontWeight: 700 }}>
-          {rest ? `残額の計算（収入 ${yen(income)}）` : `${slice.label}の内訳`}
+          {rest ? `💰 残額の計算（収入 ${yen(income)}）` : `${SLICE_EMOJI[slice.key]} ${slice.label}の内訳`}
           <small className="micro" style={{ fontWeight: 400 }}>
             {' '}
             {year}年・月平均{months < 12 ? `（${months}か月）` : ''}
@@ -321,7 +372,7 @@ function Inputs() {
     { k: 'income', icon: 'person', t: '収入', v: net ? `月${yen(net)}` : '未入力', need: people.some((x) => x.netMonthly == null || x.birthYM == null) },
     { k: 'savings', icon: 'wallet', t: '貯蓄・借入', v: `現金 ${yen(cash)}`, need: people.some((x) => x.cash == null) },
     { k: 'children', icon: 'child', t: '子供・教育', v: p.children.length ? `${p.children.length}人` : p.assumptions.childrenConfirmed ? 'なし' : '未確認', need: !p.assumptions.childrenConfirmed && !p.children.length },
-    { k: 'living', icon: 'basket', t: '生活費・お小遣い', v: living ? `月${yen(living)}` : '未入力', need: !livingItems },
+    { k: 'living', icon: 'basket', t: '生活費', v: living ? `月${yen(living)}` : '未入力', need: !livingItems },
     { k: 'insurance', icon: 'shield', t: '保険', v: p.insurances.length ? `月${yen(p.insurances.reduce((t, x) => t + x.monthly, 0))}` : 'なし' },
     { k: 'invest', icon: 'chart', t: 'NISA・投資', v: inv ? yen(inv) : 'なし' },
     { k: 'goals', icon: 'flag', t: '貯蓄目標', v: p.goals.length ? `${p.goals.length}件` : 'なし' },
@@ -341,8 +392,8 @@ function Inputs() {
       <div className="tiles">
         {tiles.map((x) => (
           <button key={x.k} className="tile" data-need={need(!!x.need)} onClick={() => s.open({ kind: x.k })}>
-            <span className="ic">
-              <Icon name={x.icon} />
+            <span className="ic emoji" aria-hidden="true">
+              {TILE_EMOJI[x.k] ?? <Icon name={x.icon} />}
             </span>
             <span className="t">{x.t}</span>
             <span className="v">{x.need ? '入力してください' : x.v}</span>

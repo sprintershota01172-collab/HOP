@@ -24,6 +24,8 @@ export interface YearRow {
   fund: Yen;
   /** 積立から払った支出 */
   fundOut: Yen;
+  /** 先取り貯金 */
+  save: Yen;
   withdraw: Yen;
   gain: Yen;
   invTax: Yen;
@@ -47,7 +49,7 @@ export function toYears(sim: SimResult): YearRow[] {
     if (!cur || cur.year !== y) {
       cur = {
         year: y, months: 0, income: 0, salary: 0, bonus: 0, benefit: 0, pension: 0, allowance: 0, otherIncome: 0,
-        living: 0, housing: 0, education: 0, insurance: 0, debt: 0, otherExpense: 0, spend: 0, contrib: 0, fund: 0, fundOut: 0, withdraw: 0,
+        living: 0, housing: 0, education: 0, insurance: 0, debt: 0, otherExpense: 0, spend: 0, contrib: 0, fund: 0, fundOut: 0, save: 0, withdraw: 0,
         gain: 0, invTax: 0, net: 0, cashEnd: 0, investEnd: 0, loanEnd: 0, homeValue: 0, netWorth: 0,
       };
       out.push(cur);
@@ -70,6 +72,7 @@ export function toYears(sim: SimResult): YearRow[] {
     cur.contrib += r.contrib;
     cur.fund += r.fundIn;
     cur.fundOut += r.fundOut;
+    cur.save += r.saveIn;
     cur.withdraw += r.withdraw + r.autoWithdraw;
     cur.gain += r.gain;
     cur.invTax += r.invTax;
@@ -104,7 +107,7 @@ export function monthPie(y: YearRow): { income: Yen; slices: PieSlice[]; withdra
     { key: 'housing', label: '住宅費', value: Math.round(y.housing / n) },
     { key: 'education', label: '教育費', value: Math.round(y.education / n) },
     { key: 'insurance', label: '保険', value: Math.round(y.insurance / n) },
-    { key: 'saving', label: '貯蓄・投資', value: Math.round((y.contrib + y.fund) / n) },
+    { key: 'saving', label: '貯蓄・投資', value: Math.round((y.contrib + y.fund + y.save) / n) },
     { key: 'other', label: 'その他支出', value: Math.round((y.debt + y.otherExpense) / n) },
   ];
   const used = items.reduce((s, x) => s + x.value, 0);

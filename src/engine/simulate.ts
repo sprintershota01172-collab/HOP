@@ -81,6 +81,8 @@ export interface MonthRow {
   fundIn: Yen;
   /** 積立から払った支出（旅行など。現金からは払わない） */
   fundOut: Yen;
+  /** 毎月の貯金（先取り）。現金のまま残すので現金の増減は変わらない */
+  saveIn: Yen;
   withdraw: Yen;
   autoWithdraw: Yen;
   gain: Yen;
@@ -90,6 +92,8 @@ export interface MonthRow {
   invest: Yen;
   /** 目的別の積立の残高（月末） */
   fund: Yen;
+  /** 現金のうち、先取りで貯金した額の累計 */
+  saved: Yen;
   loanBalance: Yen;
   /** 毎月かかる支出（予備資金の基準）。入学費用・ボーナス返済などの一時的な支出は含めない */
   need: Yen;
@@ -322,6 +326,7 @@ interface Pre {
   otherIncome: number[];
   fundIn: number[];
   fundOut: number[];
+  saveIn: number[];
 }
 
 const preCache = new WeakMap<Resolved, Map<number, Pre>>();
@@ -343,7 +348,7 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
   const mk = () => new Array<number>(n).fill(0);
   const pre: Pre = {
     f: mk(), salary: mk(), benefit: mk(), bonus: mk(), pension: mk(), retireBonus: mk(), allowance: mk(),
-    living: mk(), education: mk(), educationOnce: mk(), insurance: mk(), debt: mk(), otherExpense: mk(), otherIncome: mk(), fundIn: mk(), fundOut: mk(),
+    living: mk(), education: mk(), educationOnce: mk(), insurance: mk(), debt: mk(), otherExpense: mk(), otherIncome: mk(), fundIn: mk(), fundOut: mk(), saveIn: mk(),
   };
   // 目的別の積立: 1回だけ・数年ごとの支出を、前回の支払いの翌月（初回は今月）から支払いの前月までに均等に積み立て、積立から払う
   const funded = new Set<string>();
@@ -388,13 +393,14 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
       benefit += w.benefit;
       rec?.add(i, 'income', `salary:${p.id}`, `${p.name}の給与`, w.salary, { sheet: 'income', work: true });
       rec?.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true });
-      if ((mon === 6 || mon === 12) && p.bonus > 0 && m < p.retireYM) {
+      const spread = !!plan[p.id === 'self' ? 'self' : 'spouse']?.bonusSpread;
+      if ((spread || mon === 6 || mon === 12) && p.bonus > 0 && m < p.retireYM) {
         const window = [...hist];
         while (window.length < 6) window.unshift(1);
         const avg = window.reduce((s, v) => s + v, 0) / 6;
-        const b = (p.bonus / 2) * Math.pow(1 + p.raise, aprilsBetween(r.start, m)) * avg;
+        const b = (p.bonus / (spread ? 12 : 2)) * Math.pow(1 + p.raise, aprilsBetween(r.start, m)) * avg;
         bonus += b;
-        rec?.add(i, 'income', `bonus:${p.id}`, `${p.name}の賞与`, b, { sheet: 'income', work: true });
+        rec?.add(i, 'income', `bonus:${p.id}`, spread ? `${p.name}の賞与（月々に分けて）` : `${p.name}の賞与`, b, { sheet: 'income', work: true });
       }
       if (m === p.retireYM) {
         retireBonus += p.retireBonus;
@@ -469,6 +475,12 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     let debt = 0;
     for (const d of plan.debts)
       if (m <= d.endYM) {
+        const bp = d.bonus ?? 0;
+        if (bp > 0) {
+          const v = d.bonusSplit ? (bp * 2) / 12 : mon === 6 || mon === 12 ? bp : 0;
+          debt += v;
+          rec?.add(i, 'other', `debtBonus:${d.id}`, `${d.name}のボーナス払い${d.bonusSplit ? '（月々に割って）' : ''}`, v, d.std === 'car' ? { sheet: 'living', props: { page: 'car' } } : { sheet: 'debtEdit', props: { id: d.id } });
+        }
         debt += d.monthly;
         rec?.add(i, 'other', `debt:${d.id}`, d.name, d.monthly, d.std === 'car' ? { sheet: 'living', props: { page: 'car' } } : { sheet: 'debtEdit', props: { id: d.id } });
       }
@@ -496,6 +508,16 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     }
     pre.otherExpense[i] = Math.round(evOut);
     pre.otherIncome[i] = Math.round(evIn + insIn);
+
+    // 先取り貯金（全員が退職するまで）
+    const sv = plan.saving;
+    if (sv && !retiredAll) {
+      const mo = sv.monthly ?? 0;
+      const bo = (mon === 6 || mon === 12) && r.people.some((q) => q.bonus > 0 && m < q.retireYM) ? sv.bonus ?? 0 : 0;
+      pre.saveIn[i] = Math.round(mo + bo);
+      rec?.add(i, 'saving', 'save', '毎月の貯金', mo, { sheet: 'savings' });
+      rec?.add(i, 'saving', 'saveBonus', 'ボーナス月の貯金', bo, { sheet: 'savings', once: true });
+    }
   }
   if (!rec) byDelta.set(inflationDelta, pre);
   return pre;
@@ -523,6 +545,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
 
   let cash = r.people.reduce((s, p) => s + p.cash, 0);
   let fund = 0;
+  let saved = 0;
   const invs: InvState[] = plan.investments.map((x) => {
     const owner = r.people.find((p) => p.id === x.owner) ?? r.people[0];
     return {
@@ -586,7 +609,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
     const row: MonthRow = {
       ym: m, salary: 0, bonus: 0, benefit: 0, pension: 0, allowance: 0, otherIncome: 0, retireBonus: 0, deduction: 0, gift: 0,
       living: 0, housing: 0, rent: 0, upkeep: 0, housingOnce: 0, loanPayment: 0, loanBonus: 0, loanInterest: 0, education: 0, educationOnce: 0,
-      insurance: 0, debt: 0, otherExpense: 0, contrib: 0, fundIn: 0, fundOut: 0, withdraw: 0, autoWithdraw: 0, gain: 0, invTax: 0, cash: 0, invest: 0, fund: 0, loanBalance: 0, need: 0,
+      insurance: 0, debt: 0, otherExpense: 0, contrib: 0, fundIn: 0, fundOut: 0, saveIn: 0, saved: 0, withdraw: 0, autoWithdraw: 0, gain: 0, invTax: 0, cash: 0, invest: 0, fund: 0, loanBalance: 0, need: 0,
     };
     const incF = m >= pYM ? sc.incomeFactor : 1;
 
@@ -608,6 +631,9 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
     row.fundOut = pre.fundOut[i];
     fund += row.fundIn - row.fundOut;
     row.fund = fund;
+    row.saveIn = pre.saveIn[i];
+    saved += row.saveIn;
+    row.saved = saved;
     const retiredAll = m >= r.retireAllYM;
 
     // ---------- 住まい ----------

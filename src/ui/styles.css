@@ -451,7 +451,7 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .flowline small { font-size: var(--fs-xs); color: var(--ink-3); margin-left: 2px; }
 .hero .amount { display: flex; align-items: baseline; gap: 4px; font-family: var(--num); font-variant-numeric: tabular-nums; font-weight: 800; font-size: var(--fs-hero); line-height: 1.05; letter-spacing: -0.02em; color: var(--green); }
 .hero .amount small { font-size: 0.42em; font-weight: 700; color: var(--ink-2); letter-spacing: 0; }
-.hero .roof { position: absolute; right: 12px; top: 44px; width: 84px; height: 64px; color: var(--green-soft); pointer-events: none; }
+.hero .hero-mascot { position: absolute; right: 10px; top: 34px; width: 56px; height: 56px; pointer-events: none; }
 .ruler { position: relative; height: 46px; margin-top: 2px; }
 .ruler .track { position: absolute; left: 0; right: 0; top: 14px; height: 10px; border-radius: 5px; display: flex; overflow: hidden; background: var(--red-soft); }
 .ruler .track i { height: 100%; }
@@ -603,3 +603,15 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .lever b { font-family: var(--num); white-space: nowrap; }
 .lever svg { width: 14px; height: 14px; color: var(--ink-3); }
 .skeleton { background: var(--surface-2); border-radius: 8px; height: 14px; }
+
+/* ---------- 小さい切り替え ---------- */
+.seg.mini { width: auto; flex: none; padding: 2px; }
+.seg.mini button { min-height: 28px; padding: 0 12px; font-size: var(--fs-xs); }
+
+/* ---------- ぽっぽさん・絵文字 ---------- */
+.mascot { flex: none; display: block; }
+.mascot-says { display: flex; align-items: center; gap: 8px; text-align: left; }
+.mascot-says .bubble { position: relative; background: var(--surface); border: 1.5px solid var(--line); border-radius: 14px; padding: 8px 12px; font-size: var(--fs-s); line-height: 1.5; color: var(--ink); }
+.mascot-says .bubble::before { content: ''; position: absolute; left: -7px; top: 50%; width: 10px; height: 10px; background: var(--surface); border-left: 1.5px solid var(--line); border-bottom: 1.5px solid var(--line); transform: translateY(-50%) rotate(45deg); }
+.tile .ic.emoji { background: var(--surface-2); font-size: 17px; line-height: 1; }
+@media (max-height: 620px) { .app .hero .hero-mascot { width: 48px; height: 48px; top: 34px; } }
