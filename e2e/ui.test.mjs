@@ -315,6 +315,84 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('月の収支: 項目をタップすると下に内訳が出て、内訳の行から入力を開ける（お小遣いを入れると内訳と予算に反映）', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    const before = await heroText(page);
+    await page.click('nav button:nth-child(2)');
+    await page.waitForSelector('.detail');
+    for (const k of ['住宅費', '保険', '残額', '生活費']) {
+      await page.click(`.legend button:has-text("${k}")`);
+      await page.waitForTimeout(350);
+      assert.equal(await page.locator(`.legend button[aria-selected="true"]:has-text("${k}")`).count(), 1);
+      const head = await page.locator('.detail .label').first().textContent();
+      assert.ok(head.includes(k === '残額' ? '残額の計算' : `${k}の内訳`), head);
+      const r = await layoutReport(page);
+      assert.deepEqual(r.clipped, [], `${k}: 中身が切れている部品`);
+      assert.ok(r.docW <= r.iw);
+    }
+    // 生活費の内訳 → お小遣いの行（ページ送り）→ 入力を開く
+    let row = page.locator('.detail .ln:has-text("お小遣い")').first();
+    for (let i = 0; i < 8 && !(await row.count()); i++) {
+      await page.click('.detail .minipager button[aria-label="次のページ"]');
+      await page.waitForTimeout(150);
+    }
+    await row.click();
+    await page.waitForTimeout(400);
+    const sheet = page.locator('.sheet:not(.closing)').last();
+    assert.equal(await sheet.locator('.seg button[aria-pressed="true"]').first().textContent(), 'お小遣い・自由費');
+    const free = sheet.locator('.field:has-text("自由費") input').first();
+    await free.fill('3');
+    await free.press('Enter');
+    await page.waitForSelector('.sheet:not(.closing) .preview .diff.neg', { timeout: 15000 });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await page.click('.legend button:has-text("生活費")');
+    row = page.locator('.detail .ln:has-text("自由費")');
+    for (let i = 0; i < 8 && !(await row.count()); i++) {
+      await page.click('.detail .minipager button[aria-label="次のページ"]');
+      await page.waitForTimeout(150);
+    }
+    assert.equal(await row.count(), 1, '自由費が内訳に出る');
+    await page.click('nav button:nth-child(1)');
+    await settle(page);
+    assert.notEqual(await heroText(page), before, '自由費を入れると予算が変わる');
+    await ctx.close();
+  });
+
+  it('学資保険: 保険の画面から追加でき、子供の画面にも出る（スクロールなしで収まる）', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("保険")');
+    await page.waitForTimeout(350);
+    await page.click('.sheet .btn:has-text("学資保険を追加")');
+    await page.waitForTimeout(450);
+    const sheet = page.locator('.sheet:not(.closing)').last();
+    assert.match(await sheet.locator('h2').textContent(), /学資保険/);
+    assert.match(await sheet.locator('.card.flat').textContent(), /返戻率 100%/);
+    // 受取額を変えると返戻率が変わる
+    const amt = sheet.locator('.field:has-text("受取額") input').first();
+    await amt.fill('126');
+    await amt.press('Enter');
+    await page.waitForTimeout(300);
+    assert.match(await sheet.locator('.card.flat').textContent(), /返戻率 105%/);
+    assert.ok((await sheetOverflow(page)) <= 1, '学資保険の画面がはみ出さない');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(350);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(350);
+    await page.click('.tile:has-text("子供")');
+    await page.waitForTimeout(350);
+    await page.click('.sheet .item:has-text("第1子")');
+    await page.waitForTimeout(350);
+    await page.locator('.sheet:not(.closing)').last().locator('.seg button:has-text("学資保険")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await page.locator('.sheet:not(.closing) .pane:not(.out) .item:has-text("学資保険")').count(), 1);
+    assert.ok((await sheetOverflow(page)) <= 1);
+    await ctx.close();
+  });
+
   it('タブを素早く連打しても、最後に選んだ画面1枚だけが残る', async () => {
     const { ctx, page } = await open([390, 844]);
     for (const i of [2, 3, 4, 5, 1, 4, 2, 3]) await page.click(`nav button:nth-child(${i})`, { delay: 0 });

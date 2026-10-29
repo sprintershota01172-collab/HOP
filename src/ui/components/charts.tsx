@@ -14,7 +14,7 @@ export const SLICE_COLOR: Record<PieSlice['key'], string> = {
 };
 
 /** 月の収支の円グラフ。大きさは項目数に関係なく固定 */
-export function Donut({ slices, income, size = 132 }: { slices: PieSlice[]; income: number; size?: number }) {
+export function Donut({ slices, income, size = 132, sel }: { slices: PieSlice[]; income: number; size?: number; sel?: PieSlice['key'] | null }) {
   const r = size / 2;
   const w = size * 0.17;
   const rr = r - w / 2;
@@ -22,6 +22,8 @@ export function Donut({ slices, income, size = 132 }: { slices: PieSlice[]; inco
   const rest = slices.find((s) => s.key === 'rest')!;
   const parts = slices.filter((s) => s.key !== 'rest' || s.value > 0).filter((s) => s.value > 0);
   const total = Math.max(1, parts.reduce((s, x) => s + x.value, 0));
+  // 選んだ項目を強調する（赤字で残額の弧がないときは強調しない）
+  const focus = sel && parts.some((x) => x.key === sel) ? sel : null;
   let acc = 0;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`月の収入 ${yen(income)} の内訳`} style={{ flex: 'none' }}>
@@ -40,6 +42,8 @@ export function Donut({ slices, income, size = 132 }: { slices: PieSlice[]; inco
             strokeDasharray={`${Math.max(0, len - 1.2)} ${C}`}
             strokeDashoffset={-acc}
             transform={`rotate(-90 ${r} ${r})`}
+            opacity={focus && focus !== s.key ? 0.3 : 1}
+            style={{ transition: 'opacity 250ms ease' }}
           />
         );
         acc += len;

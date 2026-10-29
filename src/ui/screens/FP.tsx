@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import type { DetailRow, PieSlice } from '../../engine/aggregate';
 import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
 import { AssetChart, Donut, SLICE_COLOR, YearBars } from '../components/charts';
 import { Kpi, Money } from '../components/bits';
-import { useFit, useSwipe } from '../components/fields';
+import { useFit, usePages, useSwipe } from '../components/fields';
 import { Switcher } from '../components/Switcher';
 import { yen } from '../format';
 import { Icon } from '../icons';
@@ -76,6 +77,10 @@ function Result() {
   const swipe = useSwipe(() => setYear(year + 1), () => setYear(year - 1));
   const yr = fp.years.find((y) => y.year === year)!;
   const pie = fp.pies.find((p) => p.year === year)!;
+  // 内訳を表示する項目（未選択なら、いちばん大きい支出）
+  const [sel, setSel] = useState<PieSlice['key'] | null>(null);
+  const biggest = [...pie.slices].filter((x) => x.key !== 'rest').sort((a, b) => b.value - a.value)[0]?.key ?? 'living';
+  const cur: PieSlice['key'] = sel ?? biggest;
   return (
     <>
       <div className="row" style={{ flex: 'none' }}>
@@ -121,17 +126,18 @@ function Result() {
         {view === 'month' && (
           <>
             <div className="donut-wrap">
-              <Donut slices={pie.slices} income={pie.income} />
-              <div className="legend">
+              <Donut slices={pie.slices} income={pie.income} sel={cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 108 : 132} />
+              <div className="legend" role="tablist" aria-label="内訳を見る項目">
                 {pie.slices.map((x) => (
-                  <div className="li" key={x.key}>
+                  <button className="li" key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
                     <i style={{ background: x.key === 'rest' && x.value < 0 ? 'var(--red)' : SLICE_COLOR[x.key] }} />
                     <span className="ellipsis">{x.label}</span>
                     <span className={`num ${x.key === 'rest' && x.value < 0 ? 'neg' : ''}`}>{yen(x.value)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
+            <Detail key={`${cur}-${year}`} slice={pie.slices.find((x) => x.key === cur)!} rows={pie.detail[cur]} income={pie.income} months={yr.months} year={year} />
             <Happenings year={year} />
             {pie.withdraw > 0 && <div className="micro">投資の取崩し 月{yen(pie.withdraw)}（残額には含めていません）</div>}
           </>
@@ -187,7 +193,6 @@ function Result() {
 
 /** その年のできごと（購入・誕生・入学・育休・退職・イベント） */
 function Happenings({ year }: { year: number }) {
-  const fit = useFit<HTMLDivElement>(28, 6, 0);
   const s = useStore();
   const p = s.data.plan;
   const vm = s.vm!;
@@ -214,20 +219,76 @@ function Happenings({ year }: { year: number }) {
           : ymYear(e.startYM) === year;
     if (hit) list.push({ icon: e.icon, text: e.name });
   }
-  const max = Math.max(0, fit.n * 2 - 1);
+  if (!list.length) return null;
   return (
-    <div className="stack fill" style={{ gap: 4 }}>
-      <div className="label">{year}年のできごと</div>
-      {!list.length && <div className="micro">大きなできごとはありません</div>}
-      <div className="row fill" ref={fit.ref} style={{ flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }}>
-        {list.slice(0, max).map((x, i) => (
-          <span key={i} className="chip">
-            <Icon name={x.icon} />
-            {x.text}
+    <div className="happen hide-short" title={list.map((x) => x.text).join('、')}>
+      <Icon name={list[0].icon} />
+      <span className="ellipsis">
+        {year}年: {list.map((x) => x.text).join('、')}
+      </span>
+    </div>
+  );
+}
+
+/** 選んだ項目の内訳（月平均）。行をタップすると、その金額の入力画面を開く */
+function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: DetailRow[]; income: number; months: number; year: number }) {
+  const s = useStore();
+  const rest = slice.key === 'rest';
+  const short = typeof window !== 'undefined' && window.innerHeight <= 700;
+  const fit = useFit<HTMLDivElement>(short ? 25.5 : 29.5, 3, 1);
+  const pg = usePages(rows, Math.max(1, fit.n));
+  return (
+    <div className="stack fill detail" style={{ gap: 2 }}>
+      <div className="row" style={{ gap: 6 }}>
+        <span className="label ellipsis grow" style={{ fontWeight: 700 }}>
+          {rest ? `残額の計算（収入 ${yen(income)}）` : `${slice.label}の内訳`}
+          <small className="micro" style={{ fontWeight: 400 }}>
+            {' '}
+            {year}年・月平均{months < 12 ? `（${months}か月）` : ''}
+            {rows.some((r) => r.once) ? `・一時＝年の合計÷${months}` : ''}
+          </small>
+        </span>
+        {pg.pages > 1 && (
+          <span className="minipager">
+            <button disabled={pg.page === 0} onClick={() => pg.setPage(pg.page - 1)} aria-label="前のページ">
+              <Icon name="left" />
+            </button>
+            <span className="num">
+              {pg.page + 1}/{pg.pages}
+            </span>
+            <button disabled={pg.page >= pg.pages - 1} onClick={() => pg.setPage(pg.page + 1)} aria-label="次のページ">
+              <Icon name="right" />
+            </button>
           </span>
-        ))}
-        {list.length > max && max > 0 && <span className="micro">ほか{list.length - max}件</span>}
+        )}
       </div>
+      {rows.length === 0 ? (
+        <div className="empty fill">{year}年は{slice.label}がありません</div>
+      ) : (
+        <div className="wf fill" ref={fit.ref}>
+          {pg.slice.map((r) => (
+            <button key={r.key} className={`ln${rest ? '' : ' noop'}`} disabled={!r.sheet} onClick={() => r.sheet && s.open({ kind: r.sheet, props: r.props ?? {} })}>
+              {rest && <span className={`op${r.op === '+' ? ' plus' : ''}`}>{r.op}</span>}
+              <span className="nm ellipsis">{r.label}</span>
+              <span className="v">
+                {r.once && <em className="once">一時</em>}
+                {yen(r.value)}
+              </span>
+              {r.sheet ? <Icon name="right" /> : <span />}
+            </button>
+          ))}
+        </div>
+      )}
+      {rest && (
+        <div className="wf">
+          <div className="total" style={{ paddingTop: 2 }}>
+            <span className="op">=</span>
+            <span className="nm" style={{ fontWeight: 800 }}>{slice.value < 0 ? '赤字' : '残額'}</span>
+            <span className={`v${slice.value < 0 ? ' neg' : ''}`}>{yen(slice.value)}</span>
+            <span />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -248,13 +309,14 @@ function Inputs() {
   const net = people.reduce((t, x) => t + (x.netMonthly ?? 0), 0);
   const cash = people.reduce((t, x) => t + (x.cash ?? 0), 0);
   const inv = p.investments.reduce((t, x) => t + x.balance, 0);
-  const living = p.living.reduce((t, x) => t + x.monthly, 0);
+  const livingItems = p.living.reduce((t, x) => t + x.monthly, 0);
+  const living = livingItems + (p.pocket.self ?? 0) + (p.spouse ? p.pocket.spouse ?? 0 : 0) + (p.pocket.free ?? 0);
   const need = (cond: boolean) => (cond ? 'true' : 'false');
   const tiles: { k: string; icon: string; t: string; v: string; need?: boolean }[] = [
     { k: 'income', icon: 'person', t: '収入', v: net ? `月${yen(net)}` : '未入力', need: people.some((x) => x.netMonthly == null || x.birthYM == null) },
     { k: 'savings', icon: 'wallet', t: '貯蓄・借入', v: `現金 ${yen(cash)}`, need: people.some((x) => x.cash == null) },
     { k: 'children', icon: 'child', t: '子供・教育', v: p.children.length ? `${p.children.length}人` : p.assumptions.childrenConfirmed ? 'なし' : '未確認', need: !p.assumptions.childrenConfirmed && !p.children.length },
-    { k: 'living', icon: 'basket', t: '生活費', v: living ? `月${yen(living)}` : '未入力', need: !living },
+    { k: 'living', icon: 'basket', t: '生活費・お小遣い', v: living ? `月${yen(living)}` : '未入力', need: !livingItems },
     { k: 'insurance', icon: 'shield', t: '保険', v: p.insurances.length ? `月${yen(p.insurances.reduce((t, x) => t + x.monthly, 0))}` : 'なし' },
     { k: 'invest', icon: 'chart', t: 'NISA・投資', v: inv ? yen(inv) : 'なし' },
     { k: 'goals', icon: 'flag', t: '貯蓄目標', v: p.goals.length ? `${p.goals.length}件` : 'なし' },

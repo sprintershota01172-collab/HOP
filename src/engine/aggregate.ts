@@ -1,4 +1,4 @@
-import { incomeOf, spendOf, type SimResult } from './simulate';
+import { incomeOf, spendOf, type PartCat, type SimResult } from './simulate';
 import type { Yen } from './types';
 import { ymYear } from './ym';
 
@@ -103,4 +103,66 @@ export function monthPie(y: YearRow): { income: Yen; slices: PieSlice[]; withdra
   const used = items.reduce((s, x) => s + x.value, 0);
   items.push({ key: 'rest', label: '残額', value: income - used });
   return { income, slices: items, withdraw: Math.round(y.withdraw / n) };
+}
+
+/** 円グラフの項目の内訳の1行（月平均） */
+export interface DetailRow {
+  key: string;
+  label: string;
+  value: Yen;
+  op?: '+' | '−';
+  /** 値を変える入力画面 */
+  sheet: string;
+  props?: Record<string, string>;
+  /** 一時的な支出・収入を12か月で平均したもの */
+  once?: boolean;
+}
+export type PieDetail = Record<PieSlice['key'], DetailRow[]>;
+
+const SLICE_CAT: Record<Exclude<PieSlice['key'], 'rest'>, PartCat> = {
+  living: 'living', housing: 'housing', education: 'education', insurance: 'insurance', saving: 'saving', other: 'other',
+};
+
+/**
+ * 年ごとの「平均的な1か月」の項目別内訳。各項目の合計は円グラフの値と円単位で一致させる
+ * （月ごとの丸めの差は最も大きい行で調整する）。sim は detail 付きで計算したもの。
+ */
+export function pieDetails(sim: SimResult, years: YearRow[]): PieDetail[] {
+  const parts = sim.parts ?? [];
+  const out: PieDetail[] = [];
+  let i0 = 0;
+  for (const y of years) {
+    const n = Math.max(1, y.months);
+    const pie = monthPie(y);
+    const sums = new Map<PartCat, DetailRow[]>();
+    for (const pt of parts) {
+      let v = 0;
+      for (let i = i0; i < i0 + y.months; i++) v += pt.v[i];
+      if (Math.abs(v) < 0.5) continue;
+      const list = sums.get(pt.cat) ?? [];
+      list.push({ key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once });
+      sums.set(pt.cat, list);
+    }
+    const fit = (rows: DetailRow[] | undefined, total: Yen): DetailRow[] => {
+      const list = (rows ?? []).map((r) => ({ ...r, value: Math.round(r.value) })).filter((r) => r.value !== 0);
+      list.sort((a, b) => b.value - a.value);
+      const diff = total - list.reduce((t, r) => t + r.value, 0);
+      if (diff !== 0) {
+        if (list.length) list[0].value += diff;
+        else list.push({ key: 'rounding', label: 'その他', value: diff, sheet: '' });
+      }
+      return list.filter((r) => r.value !== 0);
+    };
+    const d = {} as PieDetail;
+    for (const sl of pie.slices) {
+      if (sl.key === 'rest') continue;
+      d[sl.key] = fit(sums.get(SLICE_CAT[sl.key]), sl.value).map((r) => ({ ...r, op: '−' as const }));
+    }
+    const rest = pie.slices.find((x) => x.key === 'rest')!;
+    const income = fit(sums.get('income'), pie.income).map((r) => ({ ...r, op: '+' as const }));
+    d.rest = [...income, { key: 'spent', label: '支出と積立の合計', value: pie.income - rest.value, op: '−', sheet: '' }];
+    out.push(d);
+    i0 += y.months;
+  }
+  return out;
 }

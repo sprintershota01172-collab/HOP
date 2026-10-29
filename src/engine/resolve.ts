@@ -29,6 +29,19 @@ export interface Assumed {
   sheet: string;
 }
 
+/** 保険（学資保険は子供の誕生年月から払込・受取の月を決めたもの） */
+export interface RInsurance {
+  id: string;
+  name: string;
+  monthly: Yen;
+  /** 払込の開始（この月から）。null = いまから */
+  startYM: YM | null;
+  /** 払込の終わり（この月まで）。null = 終身 */
+  endYM: YM | null;
+  lumps: { ym: YM; amount: Yen }[];
+  annuity: { startYM: YM; months: number; monthly: Yen } | null;
+}
+
 export interface Resolved {
   plan: Plan;
   ready: boolean;
@@ -42,7 +55,11 @@ export interface Resolved {
   purchaseYM: YM;
   rent: Yen;
   retireLiving: Yen;
+  /** 毎月の生活費（項目の合計 ＋ お小遣い・自由費） */
   livingTotal: Yen;
+  /** お小遣い・自由費の合計（livingTotal に含む） */
+  pocketTotal: Yen;
+  insurances: RInsurance[];
 }
 
 const man = yenText;
@@ -99,8 +116,42 @@ export function resolvePlan(plan: Plan): Resolved {
     });
   }
 
-  const livingTotal = Math.round(plan.living.reduce((s, x) => s + x.monthly, 0));
-  if (plan.living.length === 0 || livingTotal <= 0) blocking.push('毎月の生活費');
+  const livingItems = Math.round(plan.living.reduce((s, x) => s + x.monthly, 0));
+  if (plan.living.length === 0 || livingItems <= 0) blocking.push('毎月の生活費');
+  const pk = plan.pocket ?? { self: null, spouse: null, free: null };
+  const pocketTotal = Math.round((pk.self ?? 0) + (plan.spouse ? pk.spouse ?? 0 : 0) + (pk.free ?? 0));
+  const livingTotal = livingItems + pocketTotal;
+  if (pk.self == null && pk.free == null && (plan.spouse == null || pk.spouse == null))
+    assumed.push({ key: 'pocket', label: 'お小遣い・自由費', value: '未入力（生活費に含めている場合はそのままで可）', impact: 'low', sheet: 'living' });
+
+  // 保険: 学資保険は子供の年齢から払込・受取の月を決める（子供が見つからない学資保険は計算に入れない）
+  const insurances: RInsurance[] = [];
+  for (const x of plan.insurances) {
+    if (x.kind === 'education' && x.child) {
+      const ch = plan.children.find((c) => c.id === x.child!.childId);
+      if (!ch) continue;
+      insurances.push({
+        id: x.id,
+        name: x.name,
+        monthly: x.monthly,
+        startYM: ch.birthYM,
+        endYM: ch.birthYM + Math.max(0, x.child.payUntilAge) * 12 - 1,
+        lumps: x.child.payouts.filter((po) => po.amount > 0).map((po) => ({ ym: ch.birthYM + po.age * 12, amount: po.amount })),
+        annuity: null,
+      });
+      continue;
+    }
+    const po = x.payout;
+    insurances.push({
+      id: x.id,
+      name: x.name,
+      monthly: x.monthly,
+      startYM: null,
+      endYM: x.payEndYM,
+      lumps: po.type === 'lump' ? [{ ym: po.ym, amount: po.amount }] : [],
+      annuity: po.type === 'annuity' ? { startYM: po.startYM, months: po.years * 12, monthly: po.annual / 12 } : null,
+    });
+  }
 
   const h = plan.housing;
   if (h.rentMonthly == null) assumed.push({ key: 'rent', label: '現在の家賃', value: '0円（持ち家・実家など）として計算', impact: 'mid', sheet: 'housing' });
@@ -169,5 +220,7 @@ export function resolvePlan(plan: Plan): Resolved {
     rent: Math.round(h.rentMonthly ?? 0),
     retireLiving,
     livingTotal,
+    pocketTotal,
+    insurances,
   };
 }

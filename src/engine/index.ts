@@ -2,7 +2,7 @@ import { toYears, type YearRow } from './aggregate';
 import { evaluateHouses, type HouseEval } from './houses';
 import { effectiveTerms, metricsOf, recommend, tryLoan, type Context, type Metrics, type Recommendation, type Trial } from './recommend';
 import { resolvePlan, type Resolved } from './resolve';
-import type { SimResult } from './simulate';
+import { simulate, type SimResult } from './simulate';
 import type { AppData, LoanTerms } from './types';
 
 export * from './types';
@@ -38,7 +38,9 @@ export function computeAll(data: AppData): Computed {
       sim = rec.sim;
       basis = '適正予算で購入';
     }
-    fp = { sim, years: toYears(sim), basis };
+    // 同じ購入・同じ条件で、項目ごとの内訳を記録しながら計算し直す（結果の数値は同じ）
+    const detailed = simulate(resolved, sim.purchase, ctx.sc.base, { detail: true });
+    fp = { sim: detailed, years: toYears(detailed), basis };
   }
   return { resolved, rec, houses, fp };
 }

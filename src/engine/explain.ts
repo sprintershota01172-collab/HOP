@@ -105,7 +105,7 @@ function flowLines(win: MonthRow[], per: (v: number) => number): { lines: BreakL
     other && `その他 ${yenText(per(other))}`,
   ].filter(Boolean).join('・');
   lines.push({ key: 'income', label: '世帯の手取り収入', value: per(income), op: '+', sheet: 'income', sub: subIncome });
-  lines.push({ key: 'living', label: '生活費（子供の分を含む）', value: per(living), op: '−', sheet: 'living' });
+  lines.push({ key: 'living', label: '生活費・お小遣い（子供の分を含む）', value: per(living), op: '−', sheet: 'living' });
   if (edu) lines.push({ key: 'education', label: '教育費', value: per(edu), op: '−', sheet: 'children', sub: eduOnce ? `うち大学の入学費用 ${yenText(per(eduOnce))}` : undefined });
   if (ins) lines.push({ key: 'insurance', label: '保険料', value: per(ins), op: '−', sheet: 'insurance' });
   if (debt) lines.push({ key: 'debt', label: 'いまある借入の返済', value: per(debt), op: '−', sheet: 'savings' });

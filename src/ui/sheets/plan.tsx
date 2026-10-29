@@ -257,13 +257,13 @@ export function ChildEditSheet({ close, props }: SheetProps) {
       title={c.name}
       onClose={close}
       preview
-      foot={<><DeleteBtn onDelete={() => { up((pl) => void ((pl.children = pl.children.filter((x) => x.id !== c.id)), (pl.work = pl.work.map((w) => (w.childId === c.id ? { ...w, childId: null } : w))))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}
+      foot={<><DeleteBtn onDelete={() => { up((pl) => void ((pl.children = pl.children.filter((x) => x.id !== c.id)), (pl.work = pl.work.map((w) => (w.childId === c.id ? { ...w, childId: null } : w))), (pl.insurances = pl.insurances.filter((x) => !(x.kind === 'education' && x.child?.childId === c.id))))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}
     >
       <div className="card flat row between">
         <span className="label">大学卒業までの教育費（いまの物価）</span>
         <b className="num">{yen(total)}</b>
       </div>
-      <Paged pages={[{ value: 'basic', label: '基本' }, { value: 'path', label: '進路' }, { value: 'cost', label: '習い事・塾' }]}>
+      <Paged initial={(props.page as 'basic' | 'path' | 'cost' | 'edu') ?? 'basic'} pages={[{ value: 'basic', label: '基本' }, { value: 'path', label: '進路' }, { value: 'cost', label: '習い事・塾' }, { value: 'edu', label: '学資保険' }]}>
         {(page) =>
           page === 'basic' ? (
             <>
@@ -294,6 +294,8 @@ export function ChildEditSheet({ close, props }: SheetProps) {
                 </div>
               )}
             </>
+          ) : page === 'edu' ? (
+            <ChildEduIns c={c} />
           ) : (
             <>
               <div className="micro" style={{ lineHeight: 1.6 }}>
@@ -313,11 +315,63 @@ export function ChildEditSheet({ close, props }: SheetProps) {
   );
 }
 
+/** 子供ごとの学資保険 */
+function ChildEduIns({ c }: { c: Child }) {
+  const { s, p, up } = usePlan();
+  const list = p.insurances.filter((x) => x.kind === 'education' && x.child?.childId === c.id);
+  return (
+    <ItemList
+      per={3}
+      rows={list.map((x) => ({ id: x.id, icon: 'child', title: x.name, sub: insSub(x, p), right: <b className="num">月{yen(x.monthly)}</b> }))}
+      onPick={(id) => s.open({ kind: 'insEdit', props: { id } })}
+      onAdd={() => {
+        const it = newEduInsurance(c);
+        up((pl) => void pl.insurances.push(it));
+        s.open({ kind: 'insEdit', props: { id: it.id } });
+      }}
+      addLabel="学資保険を追加"
+      empty="保険料は生まれた月から払込の年齢まで、祝い金・満期金は子供がその年齢になる月に収入として計算します"
+    />
+  );
+}
+
 /* ============================== 生活費 ============================== */
 /** 「まとめて入力」の項目か（以前の版の「生活費（合計）」も同じ扱い） */
 export const isLump = (x: LivingItem) => !!x.lump || x.name === '生活費（合計）';
 
-export function LivingSection() {
+export function LivingSection({ initial }: { initial?: 'base' | 'pocket' } = {}) {
+  return (
+    <Paged initial={initial ?? 'base'} pages={[{ value: 'base', label: '生活費' }, { value: 'pocket', label: 'お小遣い・自由費' }]}>
+      {(page) => (page === 'base' ? <LivingBase /> : <PocketSection />)}
+    </Paged>
+  );
+}
+
+/** 毎月のお小遣い・自由費（生活費に加えて計算する） */
+export function PocketSection() {
+  const { p, up } = usePlan();
+  const pk = p.pocket;
+  const set = (k: keyof typeof pk, v: number | null) => up((pl) => void (pl.pocket = { ...pl.pocket, [k]: v }));
+  const total = (pk.self ?? 0) + (p.spouse ? pk.spouse ?? 0 : 0) + (pk.free ?? 0);
+  return (
+    <>
+      <div className="grid2">
+        <MoneyField label={`${p.self.name || '本人'}のお小遣い`} per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
+        {p.spouse && <MoneyField label={`${p.spouse.name || '配偶者'}のお小遣い`} per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
+      </div>
+      <MoneyField label="自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
+      <div className="card flat row between">
+        <span className="label">お小遣い・自由費の合計</span>
+        <b className="num">月{yen(total)}</b>
+      </div>
+      <div className="micro" style={{ lineHeight: 1.6 }}>
+        生活費と同じく物価に合わせて増やし、老後は「老後の生活費」に切り替えます。「生活費」にまとめて含めている場合は、ここは空欄のままにしてください（二重に数えません）。
+      </div>
+    </>
+  );
+}
+
+function LivingBase() {
   const { s, p, up } = usePlan();
   const items = p.living;
   const lumpItem = items.length === 1 && isLump(items[0]) ? items[0] : null;
@@ -385,7 +439,7 @@ export function LivingSection() {
               <Kpi label="合計（月）" v={total} />
             </div>
             <ItemList
-              per={4}
+              per={3}
               rows={items.map((x) => ({ id: x.id, icon: x.icon, title: x.name, sub: x.kind === 'fixed' ? '固定費' : '変動費', right: <b className="num">{yen(x.monthly)}</b> }))}
               onPick={(id) => s.open({ kind: 'livingEdit', props: { id } })}
               onAdd={() => s.open({ kind: 'livingAdd' })}
@@ -403,9 +457,9 @@ const LivingNote = () => (
     家賃・住宅ローン・保険料・教育費・NISAなどの積立・いまある借入の返済は、それぞれの項目で入力します（ここに入れると二重に数えます）。子供の分の生活費は年齢に合わせて自動で加えます。
   </div>
 );
-export const LivingSheet = ({ close }: SheetProps) => (
+export const LivingSheet = ({ close, props }: SheetProps) => (
   <Sheet title="毎月の生活費" onClose={close} preview foot={<Done close={close} />}>
-    <LivingSection />
+    <LivingSection initial={props?.page === 'pocket' ? 'pocket' : 'base'} />
   </Sheet>
 );
 
@@ -468,21 +522,57 @@ export function LivingEditSheet({ close, props }: SheetProps) {
 
 /* ============================== 保険 ============================== */
 const INS_LABEL: Record<Insurance['kind'], string> = { life: '生命', medical: '医療', cancer: 'がん', education: '学資', annuity: '個人年金', other: 'その他' };
+/** 学資保険の初期値（払込総額と同額の受取。保険証券・設計書の金額に置き換える前提） */
+export const newEduInsurance = (c: Child): Insurance => ({
+  id: uid('ins'),
+  name: `学資保険（${c.name}）`,
+  kind: 'education',
+  monthly: 10_000,
+  payEndYM: null,
+  payout: { type: 'none' },
+  child: { childId: c.id, payUntilAge: 10, payouts: [{ age: 18, amount: 1_200_000 }] },
+});
+
+const insSub = (x: Insurance, p: Plan): string => {
+  if (x.kind === 'education' && x.child) {
+    const ch = p.children.find((c) => c.id === x.child!.childId);
+    if (!ch) return '学資・対象の子供が見つかりません（計算に入れていません）';
+    const n = x.child.payouts.filter((po) => po.amount > 0).length;
+    return `学資・${ch.name}・${x.child.payUntilAge}歳まで払込・受取${n}回`;
+  }
+  return `${INS_LABEL[x.kind]}・${x.payEndYM ? `${ymText(x.payEndYM)}まで` : '終身払い'}${x.payout.type !== 'none' ? '・受取あり' : ''}`;
+};
+
 export function InsuranceSection() {
   const { s, p, up } = usePlan();
+  const addEdu = () => {
+    const c = p.children[0];
+    if (!c) return;
+    const it = newEduInsurance(c);
+    up((pl) => void pl.insurances.push(it));
+    s.open({ kind: 'insEdit', props: { id: it.id } });
+  };
   return (
-    <ItemList
-      per={5}
-      rows={p.insurances.map((x) => ({ id: x.id, icon: 'shield', title: x.name, sub: `${INS_LABEL[x.kind]}・${x.payEndYM ? `${ymText(x.payEndYM)}まで` : '終身払い'}${x.payout.type !== 'none' ? '・受取あり' : ''}`, right: <b className="num">月{yen(x.monthly)}</b> }))}
-      onPick={(id) => s.open({ kind: 'insEdit', props: { id } })}
-      onAdd={() => {
-        const id = uid('ins');
-        up((pl) => void pl.insurances.push({ id, name: '保険', kind: 'medical', monthly: 3_000, payEndYM: null, payout: { type: 'none' } }));
-        s.open({ kind: 'insEdit', props: { id } });
-      }}
-      addLabel="保険を追加"
-      empty="保険料は「保険料」として、受取金は受け取る月の収入として計算します（貯蓄型でも二重に数えません）"
-    />
+    <>
+      <ItemList
+        per={4}
+        rows={p.insurances.map((x) => ({ id: x.id, icon: x.kind === 'education' ? 'child' : 'shield', title: x.name, sub: insSub(x, p), right: <b className="num">月{yen(x.monthly)}</b> }))}
+        onPick={(id) => s.open({ kind: 'insEdit', props: { id } })}
+        onAdd={() => {
+          const id = uid('ins');
+          up((pl) => void pl.insurances.push({ id, name: '保険', kind: 'medical', monthly: 3_000, payEndYM: null, payout: { type: 'none' } }));
+          s.open({ kind: 'insEdit', props: { id } });
+        }}
+        addLabel="保険を追加"
+        empty="保険料は「保険料」として、受取金は受け取る月の収入として計算します（貯蓄型でも二重に数えません）"
+      />
+      {p.children.length > 0 && (
+        <button className="btn" onClick={addEdu}>
+          <Icon name="child" />
+          学資保険を追加
+        </button>
+      )}
+    </>
   );
 }
 export const InsuranceSheet = ({ close }: SheetProps) => (
@@ -497,29 +587,103 @@ export function InsEditSheet({ close, props }: SheetProps) {
   if (!it) return null;
   const set = (fn: (x: Insurance) => void) => up((pl) => fn(pl.insurances.find((x) => x.id === it.id)!));
   const po = it.payout;
+  const setKind = (v: Insurance['kind']) =>
+    set((x) => {
+      x.kind = v;
+      if (v === 'education' && !x.child && p.children[0]) x.child = newEduInsurance(p.children[0]).child;
+      if (v !== 'education') x.child = null;
+    });
   return (
     <Sheet title={it.name} onClose={close} preview foot={<><DeleteBtn onDelete={() => { up((pl) => void (pl.insurances = pl.insurances.filter((x) => x.id !== it.id))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}>
       <TextField label="名前" value={it.name} onChange={(v) => set((x) => void (x.name = v))} />
-      <Seg label="種類" value={it.kind} onChange={(v) => set((x) => void (x.kind = v))} options={(Object.keys(INS_LABEL) as Insurance['kind'][]).map((k) => ({ value: k, label: INS_LABEL[k] }))} />
-      <div className="grid2">
-        <MoneyField label="保険料" per="month" nullable={false} value={it.monthly} onChange={(v) => set((x) => void (x.monthly = v ?? 0))} />
-        <YMField label="払込の終わり" hint="空欄は終身" value={it.payEndYM} onChange={(v) => set((x) => void (x.payEndYM = v))} from={THIS_YEAR} to={THIS_YEAR + 60} />
-      </div>
-      <Seg label="受取金" value={po.type} onChange={(v) => set((x) => void (x.payout = v === 'none' ? { type: 'none' } : v === 'lump' ? { type: 'lump', ym: nowYM() + 120, amount: 1_000_000 } : { type: 'annuity', startYM: nowYM() + 360, years: 10, annual: 600_000 }))} options={[{ value: 'none', label: 'なし' }, { value: 'lump', label: '一時金' }, { value: 'annuity', label: '年金形式' }]} />
-      {po.type === 'lump' && (
-        <div className="grid2">
-          <MoneyField label="受取額" nullable={false} value={po.amount} onChange={(v) => set((x) => void (x.payout = { ...po, amount: v ?? 0 }))} />
-          <YMField label="受取時期" nullable={false} value={po.ym} onChange={(v) => v != null && set((x) => void (x.payout = { ...po, ym: v }))} from={THIS_YEAR} to={THIS_YEAR + 60} />
+      <Seg label="種類" value={it.kind} onChange={setKind} options={(Object.keys(INS_LABEL) as Insurance['kind'][]).map((k) => ({ value: k, label: INS_LABEL[k] }))} />
+      {it.kind === 'education' && it.child ? (
+        <EduInsFields it={it} set={set} />
+      ) : it.kind === 'education' ? (
+        <div className="empty">
+          <div>子供を追加すると、子供の年齢に合わせて払込と受取（祝い金・満期金）を計算します</div>
+          <button className="btn primary" onClick={() => s.open({ kind: 'children' })}>
+            子供を追加
+          </button>
         </div>
-      )}
-      {po.type === 'annuity' && (
-        <div className="grid3">
-          <MoneyField label="受取額" per="year" nullable={false} value={po.annual} onChange={(v) => set((x) => void (x.payout = { ...po, annual: v ?? 0 }))} />
-          <YMField label="開始" nullable={false} value={po.startYM} onChange={(v) => v != null && set((x) => void (x.payout = { ...po, startYM: v }))} from={THIS_YEAR} to={THIS_YEAR + 60} />
-          <NumField label="期間" unit="年" nullable={false} min={1} max={40} value={po.years} onChange={(v) => set((x) => void (x.payout = { ...po, years: Math.round(v ?? 10) }))} />
-        </div>
+      ) : (
+        <>
+          <div className="grid2">
+            <MoneyField label="保険料" per="month" nullable={false} value={it.monthly} onChange={(v) => set((x) => void (x.monthly = v ?? 0))} />
+            <YMField label="払込の終わり" hint="空欄は終身" value={it.payEndYM} onChange={(v) => set((x) => void (x.payEndYM = v))} from={THIS_YEAR} to={THIS_YEAR + 60} />
+          </div>
+          <Seg label="受取金" value={po.type} onChange={(v) => set((x) => void (x.payout = v === 'none' ? { type: 'none' } : v === 'lump' ? { type: 'lump', ym: nowYM() + 120, amount: 1_000_000 } : { type: 'annuity', startYM: nowYM() + 360, years: 10, annual: 600_000 }))} options={[{ value: 'none', label: 'なし' }, { value: 'lump', label: '一時金' }, { value: 'annuity', label: '年金形式' }]} />
+          {po.type === 'lump' && (
+            <div className="grid2">
+              <MoneyField label="受取額" nullable={false} value={po.amount} onChange={(v) => set((x) => void (x.payout = { ...po, amount: v ?? 0 }))} />
+              <YMField label="受取時期" nullable={false} value={po.ym} onChange={(v) => v != null && set((x) => void (x.payout = { ...po, ym: v }))} from={THIS_YEAR} to={THIS_YEAR + 60} />
+            </div>
+          )}
+          {po.type === 'annuity' && (
+            <div className="grid3">
+              <MoneyField label="受取額" per="year" nullable={false} value={po.annual} onChange={(v) => set((x) => void (x.payout = { ...po, annual: v ?? 0 }))} />
+              <YMField label="開始" nullable={false} value={po.startYM} onChange={(v) => v != null && set((x) => void (x.payout = { ...po, startYM: v }))} from={THIS_YEAR} to={THIS_YEAR + 60} />
+              <NumField label="期間" unit="年" nullable={false} min={1} max={40} value={po.years} onChange={(v) => set((x) => void (x.payout = { ...po, years: Math.round(v ?? 10) }))} />
+            </div>
+          )}
+        </>
       )}
     </Sheet>
+  );
+}
+
+/** 学資保険: 対象の子供・保険料・払込の年齢・受取（祝い金・満期金） */
+function EduInsFields({ it, set }: { it: Insurance; set: (fn: (x: Insurance) => void) => void }) {
+  const { p } = usePlan();
+  const e = it.child!;
+  const ch = p.children.find((c) => c.id === e.childId);
+  const setE = (fn: (x: NonNullable<Insurance['child']>) => void) =>
+    set((x) => {
+      const c = { ...x.child!, payouts: x.child!.payouts.map((po) => ({ ...po })) };
+      fn(c);
+      x.child = c;
+    });
+  const paidTotal = it.monthly * e.payUntilAge * 12;
+  const getTotal = e.payouts.reduce((t, po) => t + po.amount, 0);
+  return (
+    <>
+      {p.children.length > 1 || !ch ? (
+        <Seg label="対象の子供" value={ch ? e.childId : ''} onChange={(v) => setE((x) => void (x.childId = v))} options={p.children.map((c) => ({ value: c.id, label: c.name }))} />
+      ) : (
+        <div className="micro">対象: {ch.name}（{ymText(ch.birthYM)}生まれ{ch.birthYM > nowYM() ? '・予定' : ''}）。生まれた月から払い込みます。</div>
+      )}
+      <div className="grid2">
+        <MoneyField label="保険料" per="month" nullable={false} value={it.monthly} onChange={(v) => set((x) => void (x.monthly = v ?? 0))} />
+        <NumField label="払込は子供が" unit="歳まで" nullable={false} min={1} max={22} value={e.payUntilAge} onChange={(v) => setE((x) => void (x.payUntilAge = Math.round(v ?? 10)))} />
+      </div>
+      <div className="row between">
+        <span className="label" style={{ fontWeight: 700 }}>受取（祝い金・満期金）</span>
+        {e.payouts.length < 4 && (
+          <button className="btn ghost small" onClick={() => setE((x) => void x.payouts.push({ age: Math.min(22, (x.payouts[x.payouts.length - 1]?.age ?? 15) + 3), amount: 0 }))}>
+            <Icon name="plus" />
+            追加
+          </button>
+        )}
+      </div>
+      {e.payouts.map((po, i) => (
+        <div key={i} className="row" style={{ gap: 8, alignItems: 'flex-end' }}>
+          <div style={{ width: 96, flex: 'none' }}>
+            <NumField label="受取" unit="歳" nullable={false} min={0} max={25} value={po.age} onChange={(v) => setE((x) => void (x.payouts[i].age = Math.round(v ?? 18)))} />
+          </div>
+          <div className="grow">
+            <MoneyField label="受取額" hint="設計書の金額" nullable={false} value={po.amount} onChange={(v) => setE((x) => void (x.payouts[i].amount = v ?? 0))} />
+          </div>
+          <button className="iconbtn" aria-label="この受取を削除" onClick={() => setE((x) => void x.payouts.splice(i, 1))}>
+            <Icon name="close" />
+          </button>
+        </div>
+      ))}
+      <div className="card flat micro" style={{ lineHeight: 1.6 }}>
+        払込総額 <b className="num">{yen(paidTotal)}</b> → 受取 <b className="num">{yen(getTotal)}</b>
+        {paidTotal > 0 && <>（返戻率 <b className="num">{Math.round((getTotal / paidTotal) * 1000) / 10}%</b>）</>}
+        。保険料は「保険」、受取は受け取る月の収入として計算します。
+      </div>
+    </>
   );
 }
 

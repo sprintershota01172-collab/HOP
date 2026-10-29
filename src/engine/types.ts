@@ -91,6 +91,15 @@ export type Payout =
   | { type: 'lump'; ym: YM; amount: Yen }
   | { type: 'annuity'; startYM: YM; years: number; annual: Yen };
 
+/** 学資保険: 子供の年齢で払込・受取を決める（誕生や時期を変えても追従する） */
+export interface EduInsurance {
+  childId: ID;
+  /** 子供がこの年齢になる前の月まで払い込む */
+  payUntilAge: number;
+  /** 受取（祝い金・満期金）。子供がこの年齢になる月に受け取る */
+  payouts: { age: number; amount: Yen }[];
+}
+
 export interface Insurance {
   id: ID;
   name: string;
@@ -99,6 +108,8 @@ export interface Insurance {
   /** 払込終了（この月まで払う）。null = 終身払い */
   payEndYM: YM | null;
   payout: Payout;
+  /** 学資保険で子供に紐付ける場合（payEndYM・payout の代わりに使う） */
+  child?: EduInsurance | null;
 }
 
 export type InvestKind = 'nisaTsumitate' | 'nisaGrowth' | 'ideco' | 'taxable';
@@ -310,6 +321,14 @@ export interface Memo {
   updatedAt: number;
 }
 
+/** 毎月のお小遣い・自由費（月額・いまの価値。生活費として物価に合わせて増やす）。null = 未設定 */
+export interface Pocket {
+  self: Yen | null;
+  spouse: Yen | null;
+  /** 家族の自由費（外食・レジャー・趣味など） */
+  free: Yen | null;
+}
+
 export interface Plan {
   /** 残高（現金・投資）を入力した時点。シミュレーションの開始月 */
   baseYM: YM;
@@ -318,6 +337,7 @@ export interface Plan {
   debts: Debt[];
   children: Child[];
   living: LivingItem[];
+  pocket: Pocket;
   insurances: Insurance[];
   investments: Investment[];
   goals: Goal[];

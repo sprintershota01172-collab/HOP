@@ -83,8 +83,6 @@ export const LIVING_PRESETS: { name: string; icon: string; kind: 'fixed' | 'vari
   { name: '被服費', icon: 'shirt', kind: 'variable' },
   { name: '娯楽費', icon: 'smile', kind: 'variable' },
   { name: '旅行', icon: 'plane', kind: 'variable' },
-  { name: '本人の自由費', icon: 'wallet', kind: 'variable' },
-  { name: '配偶者の自由費', icon: 'wallet', kind: 'variable' },
   { name: 'その他', icon: 'dots', kind: 'variable' },
 ];
 
@@ -96,6 +94,7 @@ export function emptyPlan(baseYM: number): Plan {
     debts: [],
     children: [],
     living: [],
+    pocket: { self: null, spouse: null, free: null },
     insurances: [],
     investments: [],
     goals: [],
@@ -166,8 +165,9 @@ export function sampleData(baseYM: number): AppData {
   p.spouse = { ...emptyPerson('spouse'), name: 'はなこ', birthYM: toYM(y - 29, 2), netMonthly: 220_000, bonusNetAnnual: 400_000, grossAnnual: 3_900_000, raiseRate: 0.01, retireAge: 65, retireBonus: 5_000_000, pensionStartAge: 65, pensionMonthly: null, cash: 1_500_000 };
   const living: [string, number][] = [
     ['食費', 60_000], ['日用品', 10_000], ['水道光熱費', 18_000], ['通信費', 12_000], ['車関連費', 15_000], ['ガソリン', 10_000],
-    ['医療費', 5_000], ['被服費', 10_000], ['娯楽費', 15_000], ['旅行', 15_000], ['本人の自由費', 20_000], ['配偶者の自由費', 20_000], ['その他', 10_000],
+    ['医療費', 5_000], ['被服費', 10_000], ['娯楽費', 15_000], ['旅行', 15_000], ['その他', 10_000],
   ];
+  p.pocket = { self: 20_000, spouse: 20_000, free: null };
   p.living = living.map(([name, monthly]): LivingItem => {
     const preset = LIVING_PRESETS.find((x) => x.name === name)!;
     return { id: uid('liv'), name, icon: preset.icon, monthly, kind: preset.kind };

@@ -106,6 +106,8 @@ export interface SimResult {
   /** 購入月の行インデックス（購入なしは -1） */
   pIndex: number;
   retireIndex: number;
+  /** 項目ごとの金額（detail を指定したときだけ） */
+  parts?: Part[];
 }
 
 export const incomeOf = (r: MonthRow): Yen =>
@@ -131,46 +133,67 @@ interface InvState {
   unlockYM: YM;
 }
 
+/** 教育費の内訳（childMonth の parts のキー） */
+export const EDU_PART_LABEL = {
+  nursery: '保育料',
+  school: '学校の費用',
+  outside: '習い事・塾など',
+  univ: '大学の学費',
+  away: '仕送り',
+  other: 'その他の教育費',
+  entrance: '大学の入学費用',
+} as const;
+export type EduPart = keyof typeof EDU_PART_LABEL;
+
 /** 子供1人のその月の教育費と生活費加算（物価補正前の今の価値） */
-export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving']): { edu: Yen; living: Yen; once: Yen } {
-  if (m < c.birthYM) return { edu: 0, living: 0, once: 0 };
+export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving']): { edu: Yen; living: Yen; once: Yen; parts: Partial<Record<EduPart, number>> } {
+  const parts: Partial<Record<EduPart, number>> = {};
+  if (m < c.birthYM) return { edu: 0, living: 0, once: 0, parts };
+  const add = (k: EduPart, v: number) => {
+    if (v) parts[k] = (parts[k] ?? 0) + v;
+  };
   const g = gradeAt(c.birthYM, m);
   const univEnd = 12 + (c.univ === 'none' ? 0 : c.univYears);
   const customOutside = c.lessonsMonthly != null || c.jukuMonthly != null;
   const outsideMonthly = (c.lessonsMonthly ?? 0) + (c.jukuMonthly ?? 0);
-  let edu = 0;
   let living = 0;
   if (g <= -3) {
     const months = m - c.birthYM;
-    if (c.nurseryUse && months >= c.nurseryStartAge * 12) edu += c.nurseryMonthly ?? ASSUME.nurseryMonthly;
+    if (c.nurseryUse && months >= c.nurseryStartAge * 12) add('nursery', c.nurseryMonthly ?? ASSUME.nurseryMonthly);
     living = childLiving.preschool;
   } else if (g <= 0) {
     if (c.kinder !== 'none') {
       const row = EDU_MEXT.kinder[c.kinder];
-      edu += row.school / 12 + (customOutside ? outsideMonthly : row.outside / 12);
+      add('school', row.school / 12);
+      add('outside', customOutside ? outsideMonthly : row.outside / 12);
     } else {
-      edu += customOutside ? outsideMonthly : EDU_MEXT.kinder.public.outside / 12;
+      add('outside', customOutside ? outsideMonthly : EDU_MEXT.kinder.public.outside / 12);
     }
     living = childLiving.preschool;
   } else if (g <= 12) {
     const stage = g <= 6 ? EDU_MEXT.elem : g <= 9 ? EDU_MEXT.middle : EDU_MEXT.high;
     const choice = g <= 6 ? c.elem : g <= 9 ? c.middle : c.high;
     const row = stage[choice];
-    edu += row.school / 12 + (customOutside ? outsideMonthly : row.outside / 12);
+    add('school', row.school / 12);
+    add('outside', customOutside ? outsideMonthly : row.outside / 12);
     living = g <= 6 ? childLiving.elem : childLiving.middleHigh;
   } else if (g <= univEnd) {
     const u = EDU_UNIV[c.univ as Exclude<typeof c.univ, 'none'>];
-    edu += u.annual / 12 + c.univAwayMonthly + (c.lessonsMonthly ?? 0);
+    add('univ', u.annual / 12);
+    add('away', c.univAwayMonthly);
+    add('outside', c.lessonsMonthly ?? 0);
     living = childLiving.univ;
   }
-  if (g >= -2 && g <= univEnd) edu += c.otherAnnual / 12;
+  if (g >= -2 && g <= univEnd) add('other', c.otherAnnual / 12);
   // 大学の入学費用（受験料・併願校納付金を含む）は高3の2月に計上（一時的な支出）
   let once = 0;
   if (c.univ !== 'none') {
     const fy12 = elemStartFY(c.birthYM) + 11;
     if (m === toYM(fy12 + 1, 2)) once = EDU_UNIV[c.univ].entrance;
   }
-  return { edu: edu + once, living, once };
+  add('entrance', once);
+  const edu = Object.values(parts).reduce((t, v) => t + (v ?? 0), 0);
+  return { edu, living, once, parts };
 }
 
 /** 児童手当（月額） */
@@ -226,6 +249,42 @@ function workIncome(r: Resolved, p: RPerson, m: YM): { salary: number; benefit: 
   return { salary: base * ratio, benefit, ratio };
 }
 
+/** 月の収支の内訳のカテゴリ（FP画面の円グラフと同じ） */
+export type PartCat = 'income' | 'living' | 'housing' | 'education' | 'insurance' | 'saving' | 'other';
+
+/** 項目ごとの毎月の金額（丸める前）。FP画面の内訳表示に使う */
+export interface Part {
+  cat: PartCat;
+  key: string;
+  label: string;
+  /** 値を変える入力画面 */
+  sheet: string;
+  props?: Record<string, string>;
+  /** 一時的な支出・収入（購入時の頭金、入学費用、退職金など） */
+  once?: boolean;
+  /** 購入後の勤労収入（シナリオの収入倍率を掛ける） */
+  work?: boolean;
+  v: number[];
+}
+
+class Parts {
+  map = new Map<string, Part>();
+  constructor(readonly n: number) {}
+  add(i: number, cat: PartCat, key: string, label: string, value: number, meta?: Partial<Pick<Part, 'sheet' | 'props' | 'once' | 'work'>>) {
+    if (!value) return;
+    const k = `${cat}:${key}`;
+    let p = this.map.get(k);
+    if (!p) {
+      p = { cat, key, label, sheet: meta?.sheet ?? '', props: meta?.props, once: meta?.once, work: meta?.work, v: new Array<number>(this.n).fill(0) };
+      this.map.set(k, p);
+    }
+    p.v[i] += value;
+  }
+  list(): Part[] {
+    return [...this.map.values()];
+  }
+}
+
 /** 住宅・シナリオに依存しない月々の値（物価上昇率の違いごとにキャッシュ） */
 interface Pre {
   f: number[];
@@ -246,13 +305,13 @@ interface Pre {
 
 const preCache = new WeakMap<Resolved, Map<number, Pre>>();
 
-function prepare(r: Resolved, inflationDelta: number): Pre {
+function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
   let byDelta = preCache.get(r);
   if (!byDelta) {
     byDelta = new Map();
     preCache.set(r, byDelta);
   }
-  const hit = byDelta.get(inflationDelta);
+  const hit = rec ? undefined : byDelta.get(inflationDelta);
   if (hit) return hit;
   const plan = r.plan;
   const a = plan.assumptions;
@@ -283,24 +342,50 @@ function prepare(r: Resolved, inflationDelta: number): Pre {
       if (hist.length > 6) hist.shift();
       salary += w.salary;
       benefit += w.benefit;
+      rec?.add(i, 'income', `salary:${p.id}`, `${p.name}の給与`, w.salary, { sheet: 'income', work: true });
+      rec?.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true });
       if ((mon === 6 || mon === 12) && p.bonus > 0 && m < p.retireYM) {
         const window = [...hist];
         while (window.length < 6) window.unshift(1);
         const avg = window.reduce((s, v) => s + v, 0) / 6;
-        bonus += (p.bonus / 2) * Math.pow(1 + p.raise, aprilsBetween(r.start, m)) * avg;
+        const b = (p.bonus / 2) * Math.pow(1 + p.raise, aprilsBetween(r.start, m)) * avg;
+        bonus += b;
+        rec?.add(i, 'income', `bonus:${p.id}`, `${p.name}の賞与`, b, { sheet: 'income', work: true });
       }
-      if (m === p.retireYM) retireBonus += p.retireBonus;
-      if (m >= p.pensionYM) pension += p.pension * Math.pow(1 + pensionGrowth, y - baseYear);
+      if (m === p.retireYM) {
+        retireBonus += p.retireBonus;
+        rec?.add(i, 'income', `retire:${p.id}`, `${p.name}の退職金`, p.retireBonus, { sheet: 'income', once: true });
+      }
+      if (m >= p.pensionYM) {
+        const pv = p.pension * Math.pow(1 + pensionGrowth, y - baseYear);
+        pension += pv;
+        rec?.add(i, 'income', `pension:${p.id}`, `${p.name}の年金`, pv, { sheet: 'income' });
+      }
     }
     pre.salary[i] = salary;
     pre.benefit[i] = benefit;
     pre.bonus[i] = bonus;
     pre.pension[i] = Math.round(pension);
     pre.retireBonus[i] = Math.round(retireBonus);
-    if (a.childAllowance) pre.allowance[i] = childAllowance(plan.children, m);
+    if (a.childAllowance) {
+      pre.allowance[i] = childAllowance(plan.children, m);
+      rec?.add(i, 'income', 'allowance', '児童手当', pre.allowance[i], { sheet: 'children' });
+    }
 
     const retiredAll = m >= r.retireAllYM;
     let living = (retiredAll ? r.retireLiving : r.livingTotal) * f;
+    if (rec) {
+      if (retiredAll) rec.add(i, 'living', 'retire', '老後の生活費', r.retireLiving * f, { sheet: 'assumptions', props: { page: 'life' } });
+      else {
+        for (const x of plan.living) rec.add(i, 'living', `item:${x.id}`, x.name, x.monthly * f, { sheet: 'living' });
+        const pk = plan.pocket;
+        if (pk) {
+          rec.add(i, 'living', 'pocket:self', `${r.people[0]?.name ?? '本人'}のお小遣い`, (pk.self ?? 0) * f, { sheet: 'living', props: { page: 'pocket' } });
+          if (plan.spouse) rec.add(i, 'living', 'pocket:spouse', `${r.people[1]?.name ?? '配偶者'}のお小遣い`, (pk.spouse ?? 0) * f, { sheet: 'living', props: { page: 'pocket' } });
+          rec.add(i, 'living', 'pocket:free', '自由費', (pk.free ?? 0) * f, { sheet: 'living', props: { page: 'pocket' } });
+        }
+      }
+    }
     let edu = 0;
     let once = 0;
     for (const c of plan.children) {
@@ -308,22 +393,41 @@ function prepare(r: Resolved, inflationDelta: number): Pre {
       edu += (cm.edu - cm.once) * f;
       once += cm.once * f;
       living += cm.living * f;
+      if (rec) {
+        rec.add(i, 'living', `child:${c.id}`, `${c.name}の生活費（食費など）`, cm.living * f, { sheet: 'assumptions', props: { page: 'kids' } });
+        for (const k of Object.keys(cm.parts) as EduPart[])
+          rec.add(i, 'education', `${c.id}:${k}`, `${c.name} ${EDU_PART_LABEL[k]}`, (cm.parts[k] ?? 0) * f, { sheet: 'childEdit', props: { id: c.id }, once: k === 'entrance' });
+      }
     }
     pre.living[i] = Math.round(living);
     pre.educationOnce[i] = Math.round(once);
     pre.education[i] = Math.round(edu) + pre.educationOnce[i];
 
     let ins = 0, insIn = 0;
-    for (const x of plan.insurances) {
-      if (x.payEndYM == null || m <= x.payEndYM) ins += x.monthly;
-      const po = x.payout;
-      if (po.type === 'lump' && po.ym === m) insIn += po.amount;
-      if (po.type === 'annuity' && m >= po.startYM && m < po.startYM + po.years * 12) insIn += po.annual / 12;
+    for (const x of r.insurances) {
+      if ((x.startYM == null || m >= x.startYM) && (x.endYM == null || m <= x.endYM)) {
+        ins += x.monthly;
+        rec?.add(i, 'insurance', x.id, x.name, x.monthly, { sheet: 'insEdit', props: { id: x.id } });
+      }
+      for (const l of x.lumps) {
+        if (l.ym !== m) continue;
+        insIn += l.amount;
+        rec?.add(i, 'income', `ins:${x.id}`, `${x.name}の受取`, l.amount, { sheet: 'insEdit', props: { id: x.id }, once: true });
+      }
+      const an = x.annuity;
+      if (an && m >= an.startYM && m < an.startYM + an.months) {
+        insIn += an.monthly;
+        rec?.add(i, 'income', `ins:${x.id}`, `${x.name}の受取`, an.monthly, { sheet: 'insEdit', props: { id: x.id } });
+      }
     }
     pre.insurance[i] = Math.round(ins);
 
     let debt = 0;
-    for (const d of plan.debts) if (m <= d.endYM) debt += d.monthly;
+    for (const d of plan.debts)
+      if (m <= d.endYM) {
+        debt += d.monthly;
+        rec?.add(i, 'other', `debt:${d.id}`, d.name, d.monthly, { sheet: 'debtEdit', props: { id: d.id } });
+      }
     pre.debt[i] = Math.round(debt);
 
     let evOut = 0, evIn = 0;
@@ -337,13 +441,19 @@ function prepare(r: Resolved, inflationDelta: number): Pre {
       }
       if (!hit) continue;
       const amt = e.inflate ? e.amount * f : e.amount;
-      if (e.kind === 'expense') evOut += amt;
-      else evIn += amt;
+      const meta = { sheet: 'eventEdit', props: { id: e.id }, once: e.pattern !== 'monthly' };
+      if (e.kind === 'expense') {
+        evOut += amt;
+        rec?.add(i, 'other', `ev:${e.id}`, e.name, amt, meta);
+      } else {
+        evIn += amt;
+        rec?.add(i, 'income', `ev:${e.id}`, e.name, amt, meta);
+      }
     }
     pre.otherExpense[i] = Math.round(evOut);
     pre.otherIncome[i] = Math.round(evIn + insIn);
   }
-  byDelta.set(inflationDelta, pre);
+  if (!rec) byDelta.set(inflationDelta, pre);
   return pre;
 }
 
@@ -352,8 +462,9 @@ function prepare(r: Resolved, inflationDelta: number): Pre {
  * すべての金額は各月の項目ごとに円単位へ丸めてから足し合わせるため、
  * 月次 → 年次の集計と残高の増減は円単位で一致する。
  */
-export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): SimResult {
+export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, opts?: { detail?: boolean }): SimResult {
   const plan = r.plan;
+  const rec = opts?.detail ? new Parts(r.end - r.start + 1) : undefined;
   const a = plan.assumptions;
   const rm = Math.pow(1 + sc.returnRate, 1 / 12) - 1;
   const rows: MonthRow[] = [];
@@ -417,7 +528,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     }
   }
 
-  const pre = prepare(r, sc.inflationDelta);
+  const pre = prepare(r, sc.inflationDelta, rec);
   const nisaYear = new Map<string, { y: number; ts: number; gr: number }>();
   const hp = plan.housing;
   const reserveMonths = a.reserveMonths;
@@ -453,12 +564,20 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     // ---------- 住まい ----------
     let upkeep = 0;
     const rentEnd = purchase ? purchase.ym + Math.max(0, hp.overlapMonths) : Infinity;
-    if (m < rentEnd) row.rent = r.rent;
+    if (m < rentEnd) {
+      row.rent = r.rent;
+      rec?.add(i, 'housing', 'rent', '家賃', r.rent, { sheet: 'housing', props: { page: 'now' } });
+    }
     if (purchase) {
       const hm = purchase.house;
       if (m === purchase.ym) {
         row.housingOnce = Math.round(purchase.down + (hp.movingCost ?? 0));
         row.gift = Math.round(hp.gift);
+        if (rec) {
+          rec.add(i, 'housing', 'down', '頭金・諸費用（購入時に現金で払う分）', purchase.down, { sheet: 'housing', props: { page: 'plan' }, once: true });
+          rec.add(i, 'housing', 'moving', '引越し・家具など', hp.movingCost ?? 0, { sheet: 'housing', props: { page: 'plan' }, once: true });
+          rec.add(i, 'income', 'gift', '親などからの援助', hp.gift, { sheet: 'housing', props: { page: 'plan' }, once: true });
+        }
       }
       if (m > purchase.ym) {
         const yi = Math.floor((m - purchase.ym - 1) / 12);
@@ -470,12 +589,23 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
         }
         const tax = taxByYear[yi];
         upkeep = tax / 12 + hm.insuranceAnnual / 12 + hm.maintenanceMonthly * f + hm.parkingMonthly;
+        if (rec) {
+          const cost = { sheet: 'housing', props: { page: 'cost' } };
+          rec.add(i, 'housing', 'tax', '固定資産税・都市計画税', tax / 12, cost);
+          rec.add(i, 'housing', 'fire', '火災・地震保険', hm.insuranceAnnual / 12, cost);
+          rec.add(i, 'housing', 'maint', hm.kind === 'mansion' ? '管理費・修繕積立金' : '修繕費の積立', hm.maintenanceMonthly * f, cost);
+          rec.add(i, 'housing', 'parking', '駐車場', hm.parkingMonthly, cost);
+        }
       }
       if (schedule) {
         const k = m - purchase.ym;
         if (k >= 1 && k <= schedule.months) {
           row.loanPayment = schedule.monthly[k - 1] + schedule.bonus[k - 1];
           row.loanBonus = schedule.bonus[k - 1];
+          if (rec) {
+            rec.add(i, 'housing', 'loan', '住宅ローンの返済', schedule.monthly[k - 1], { sheet: 'loanTerms' });
+            rec.add(i, 'housing', 'loanBonus', '住宅ローンのボーナス返済', schedule.bonus[k - 1], { sheet: 'loanTerms' });
+          }
           row.loanInterest = schedule.interest[k - 1];
           row.loanBalance = schedule.balance[k - 1];
         } else if (k < 1) {
@@ -483,6 +613,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
         }
       }
       row.deduction = deductionByMarch.get(m) ?? 0;
+      rec?.add(i, 'income', 'deduction', '住宅ローン控除', row.deduction, { sheet: 'housing', props: { page: 'tax' } });
     }
     row.upkeep = Math.round(upkeep);
     row.housing = row.rent + row.upkeep + row.loanPayment;
@@ -519,6 +650,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
         s.bal += c;
         s.basis += c;
         contrib += c;
+        rec?.add(i, 'saving', x.id, x.name, c, { sheet: 'invEdit', props: { id: x.id } });
       }
       if (x.withdrawStartYM != null && m >= x.withdrawStartYM && x.withdrawMonthly > 0 && s.bal > 0) {
         if (m < s.unlockYM) {
@@ -570,6 +702,13 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     rows.push(row);
   }
 
+  let parts: Part[] | undefined;
+  if (rec) {
+    parts = rec.list();
+    // 購入後の勤労収入には、シナリオの収入倍率を掛ける（行の値と同じ）
+    if (purchase && sc.incomeFactor !== 1)
+      for (const pt of parts) if (pt.work) for (let i = Math.max(0, purchase.ym - r.start); i < pt.v.length; i++) pt.v[i] *= sc.incomeFactor;
+  }
   return {
     start: r.start,
     end: r.end,
@@ -579,6 +718,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     warnings,
     pIndex: purchase ? purchase.ym - r.start : -1,
     retireIndex: Math.max(0, r.retireAllYM - r.start),
+    parts,
   };
 }
 
