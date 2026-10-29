@@ -4,7 +4,7 @@ import { monthPie, toYears } from '../src/engine/aggregate';
 import { uid } from '../src/engine/defaults';
 import { goalStatus } from '../src/engine/goals';
 import { computeAll } from '../src/engine/index';
-import { EDU_MEXT, EDU_UNIV, LEAVE } from '../src/engine/reference';
+import { EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE } from '../src/engine/reference';
 import { makeContext, scenarios, tryLoan } from '../src/engine/recommend';
 import { resolvePlan } from '../src/engine/resolve';
 import { childAllowance, childMonth, incomeOf, simulate, spendOf } from '../src/engine/simulate';
@@ -115,7 +115,7 @@ describe('教育費', () => {
     const living = d.plan.assumptions.childLiving;
     assert.equal(childMonth(c, toYM(2028, 5), living).edu, 0);
     near(childMonth(c, toYM(2035, 3), living).edu, (EDU_MEXT.kinder.public.school + EDU_MEXT.kinder.public.outside) / 12);
-    near(childMonth(c, toYM(2035, 4), living).edu, (EDU_MEXT.elem.public.school + EDU_MEXT.elem.public.outside) / 12);
+    near(childMonth(c, toYM(2035, 4), living).edu, (EDU_MEXT.elem.public.school - EDU_LUNCH.elemPublic + EDU_MEXT.elem.public.outside) / 12);
     near(childMonth(c, toYM(2047, 2), living).edu, (EDU_MEXT.high.public.school + EDU_MEXT.high.public.outside) / 12 + EDU_UNIV.national.entrance);
     near(childMonth(c, toYM(2047, 4), living).edu, EDU_UNIV.national.annual / 12);
     assert.equal(childMonth(c, toYM(2051, 4), living).edu, 0);
@@ -126,7 +126,7 @@ describe('教育費', () => {
     const living = d.plan.assumptions.childLiving;
     const jan = { ...d.plan.children[0], birthYM: toYM(2029, 1) };
     const apr = { ...d.plan.children[0], birthYM: toYM(2029, 4) };
-    const elem = (EDU_MEXT.elem.public.school + EDU_MEXT.elem.public.outside) / 12;
+    const elem = (EDU_MEXT.elem.public.school - EDU_LUNCH.elemPublic + EDU_MEXT.elem.public.outside) / 12;
     near(childMonth(jan, toYM(2035, 4), living).edu, elem);
     assert.ok(Math.abs(childMonth(apr, toYM(2035, 4), living).edu - elem) > 1);
     near(childMonth(apr, toYM(2036, 4), living).edu, elem);

@@ -1,5 +1,6 @@
 import { buildSchedule, ratePath, type LoanSchedule } from './loan';
-import { ASSUME, CHILD_ALLOWANCE, CHILD_COST, EDU_MEXT, EDU_UNIV, LEAVE } from './reference';
+import { ASSUME, CHILD_ALLOWANCE, CHILD_COST, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, LUNCH_RELIEF_FROM } from './reference';
+import { FUKUSHOKU_EXEMPT_BELOW, NATIONAL, nurseryFee, REGIONS, residentIncomeTax, type RegionInfo } from './region';
 import { annuityPayment } from './loan';
 import type { Resolved, RPerson } from './resolve';
 import { deductionLimit, estimateDeductibleTax, estimatePropertyTax, marginalTaxRate } from './tax';
@@ -158,6 +159,8 @@ interface InvState {
 export const EDU_PART_LABEL = {
   nursery: '保育料',
   school: '学校の費用',
+  lunch: '給食費',
+  afterSchool: '学童保育',
   outside: '習い事・塾など',
   univ: '大学の学費',
   away: '仕送り',
@@ -189,7 +192,39 @@ export function childLivingOf(c: Child, m: YM, scale = 1): Record<ChildLivingPar
 }
 
 /** 子供1人のその月の教育費と生活費加算（物価補正前の今の価値） */
-export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving'], scale = 1): { edu: Yen; living: Yen; once: Yen; parts: Partial<Record<EduPart, number>>; lv: Record<ChildLivingPart, number> } {
+/** 子供の費用の計算に使う、その月の世帯の状況 */
+export interface ChildCtx {
+  region: RegionInfo | null;
+  /** 父母の市町村民税所得割額の合計（保育料の階層・副食費の免除に使う） */
+  incomeTax: number;
+  /** 上の兄弟のうち、同じ月に保育園・幼稚園などに通っている人数 */
+  preschoolOrder: number;
+  /** 上の兄弟の人数 */
+  birthOrder: number;
+}
+
+/** 0〜2歳の保育料（月額）と、どう決めたか */
+export function nurseryMonthlyOf(c: Child, ctx: ChildCtx | null): { fee: number; how: string } {
+  if (c.nurseryMonthly != null) return { fee: c.nurseryMonthly, how: '入力した額' };
+  const reg = ctx?.region;
+  if (!reg || !ctx) return { fee: ASSUME.nurseryMonthly, how: '仮置き（地域を選ぶと市の保育料表で計算）' };
+  const b = nurseryFee(reg, ctx.incomeTax);
+  let fee = b.fee;
+  let tag = '';
+  if (reg.nursery.second === 'free' && ctx.birthOrder >= 1) {
+    fee = 0;
+    tag = '・第2子以降は無料';
+  } else if (reg.nursery.second === 'half' && ctx.preschoolOrder >= 2) {
+    fee = 0;
+    tag = '・3人目は無料';
+  } else if (reg.nursery.second === 'half' && ctx.preschoolOrder === 1) {
+    fee = Math.round(fee / 2);
+    tag = '・2人目は半額';
+  }
+  return { fee, how: `${reg.name}の${b.code}階層（世帯の所得割 約${Math.round(ctx.incomeTax).toLocaleString('ja-JP')}円）${tag}` };
+}
+
+export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving'], scale = 1, ctx: ChildCtx | null = null): { edu: Yen; living: Yen; once: Yen; parts: Partial<Record<EduPart, number>>; lv: Record<ChildLivingPart, number> } {
   const parts: Partial<Record<EduPart, number>> = {};
   void childLiving;
   const lv = childLivingOf(c, m, scale);
@@ -204,21 +239,37 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
   const living = lv.food + lv.wear + lv.misc + lv.leisure;
   if (g <= -3) {
     const months = m - c.birthYM;
-    if (c.nurseryUse && months >= c.nurseryStartAge * 12) add('nursery', c.nurseryMonthly ?? ASSUME.nurseryMonthly);
+    if (c.nurseryUse && months >= c.nurseryStartAge * 12) add('nursery', nurseryMonthlyOf(c, ctx).fee);
   } else if (g <= 0) {
     if (c.kinder !== 'none') {
       const row = EDU_MEXT.kinder[c.kinder];
       add('school', row.school / 12);
       add('outside', customOutside ? outsideMonthly : row.outside / 12);
     } else {
+      // 保育園など: 保育料は無償化で0円、給食費（主食費＋副食費）は実費。所得割57,700円未満なら副食費は免除
+      if (c.nurseryUse) {
+        const exempt = ctx ? ctx.incomeTax < FUKUSHOKU_EXEMPT_BELOW : false;
+        const meal = ctx?.region ? ctx.region.preschoolMeal.monthly - (exempt ? ctx.region.preschoolMeal.fukushoku : 0) : exempt ? 0 : NATIONAL.preschoolMeal;
+        add('lunch', meal);
+      }
       add('outside', customOutside ? outsideMonthly : EDU_MEXT.kinder.public.outside / 12);
     }
   } else if (g <= 12) {
     const stage = g <= 6 ? EDU_MEXT.elem : g <= 9 ? EDU_MEXT.middle : EDU_MEXT.high;
     const choice = g <= 6 ? c.elem : g <= 9 ? c.middle : c.high;
     const row = stage[choice];
-    add('school', row.school / 12);
+    if (choice === 'public' && g <= 6) {
+      // 公立小: 給食費は2026年4月から国の負担軽減（月5,200円まで）で保護者負担0円
+      add('school', (row.school - EDU_LUNCH.elemPublic) / 12);
+      if (m < LUNCH_RELIEF_FROM) add('lunch', EDU_LUNCH.elemPublic / 12);
+    } else if (choice === 'public' && g <= 9) {
+      add('school', (row.school - EDU_LUNCH.middlePublic) / 12);
+      add('lunch', (ctx?.region ? ctx.region.middleLunch.annual : NATIONAL.middleLunch) / 12);
+    } else {
+      add('school', row.school / 12);
+    }
     add('outside', customOutside ? outsideMonthly : row.outside / 12);
+    if (c.afterSchool && g >= 1 && g <= 3) add('afterSchool', c.afterSchoolMonthly ?? (ctx?.region?.afterSchool.annual ?? 0) / 12);
   } else if (g <= univEnd) {
     const u = EDU_UNIV[c.univ as Exclude<typeof c.univ, 'none'>];
     add('univ', u.annual / 12);
@@ -381,6 +432,35 @@ interface Pre {
 
 const preCache = new WeakMap<Resolved, Map<number, Pre>>();
 
+/** 住む地域の都市計画税の税率（地域なしは上限の0.3%） */
+export const cityPlanRateOf = (key: RegionInfo['key'] | null | undefined) => (key ? REGIONS[key].cityPlanRate : NATIONAL.cityPlanRate);
+
+/**
+ * その月の子供ごとの状況（保育料の階層・兄弟の順番）。地域を選んでいない場合も兄弟の順番と所得割は入れる。
+ * 所得割は、その年の額面年収（昇給込み・退職後は0）から概算する。
+ */
+export function householdIncomeTax(r: Resolved, m: YM): number {
+  const years = Math.max(0, ymYear(m) - ymYear(r.plan.baseYM));
+  const gross = r.people.map((p) => (m < p.retireYM ? p.gross * Math.pow(1 + p.raise, years) : 0));
+  return gross.reduce((t, g, i) => t + residentIncomeTax(g, gross.length > 1 ? gross[1 - i] : null), 0);
+}
+
+export function childCtxs(r: Resolved, m: YM, region: RegionInfo | null): Map<string, ChildCtx> {
+  const incomeTax = householdIncomeTax(r, m);
+  const kids = [...r.plan.children].sort((x, y) => x.birthYM - y.birthYM);
+  const out = new Map<string, ChildCtx>();
+  kids.forEach((c, i) => {
+    const older = kids.slice(0, i).filter((o) => o.birthYM <= m);
+    const preschoolOrder = older.filter((o) => {
+      const g = gradeAt(o.birthYM, m);
+      if (g > 0) return false;
+      return g <= -3 ? o.nurseryUse && m - o.birthYM >= o.nurseryStartAge * 12 : o.nurseryUse || o.kinder !== 'none';
+    }).length;
+    out.set(c.id, { region, incomeTax, preschoolOrder, birthOrder: older.length });
+  });
+  return out;
+}
+
 function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
   let byDelta = preCache.get(r);
   if (!byDelta) {
@@ -391,6 +471,7 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
   if (hit) return hit;
   const plan = r.plan;
   const a = plan.assumptions;
+  const region = a.region ? REGIONS[a.region] : null;
   const infl = a.inflation + inflationDelta;
   const pensionGrowth = a.inflation + a.pensionAdjust;
   const baseYear = ymYear(r.start);
@@ -509,8 +590,9 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     }
     let edu = 0;
     let once = 0;
+    const kids = childCtxs(r, m, region);
     for (const c of plan.children) {
-      const cm = childMonth(c, m, a.childLiving, a.childCostScale ?? 1);
+      const cm = childMonth(c, m, a.childLiving, a.childCostScale ?? 1, kids.get(c.id) ?? null);
       edu += (cm.edu - cm.once) * f;
       once += cm.once * f;
       living += cm.living * f;
@@ -742,6 +824,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
           taxByYear[yi] = hm.propertyTaxAnnual ?? estimatePropertyTax(
             { kind: hm.kind, newBuild: hm.newBuild, landPrice: hm.landPrice, buildingPrice: hm.buildingPrice, floorArea: hm.floorArea, energy: hm.energy, cutEnabled: hp.newBuildTaxCut },
             yi,
+            cityPlanRateOf(plan.assumptions.region),
           );
         }
         const tax = taxByYear[yi];

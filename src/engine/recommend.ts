@@ -3,6 +3,7 @@ import { ASSUME, CARE_RESERVE, SCREENING } from './reference';
 import type { Resolved } from './resolve';
 import { incomeOf, simulate, spendOf, type HouseModel, type MonthRow, type Purchase, type Scenario, type SimResult } from './simulate';
 import { estimatePropertyTax } from './tax';
+import { cityPlanRateOf } from './simulate';
 import type { Assumptions, House, LoanTerms, Yen, YM } from './types';
 import { yenText } from './text';
 import { ageAt, ymYear } from './ym';
@@ -228,7 +229,7 @@ export function makeContext(r: Resolved): Context {
 export function housingMonthly(ctx: Context, house: HouseModel, loan: Yen): Yen {
   const t = ctx.terms;
   const pay = loan > 0 ? annuityPayment(loan * (1 - t.bonusShare), t.rate / 12, t.years * 12) + annuityPayment(loan * t.bonusShare, t.rate / 2, Math.floor(t.years * 2)) / 6 : 0;
-  const tax = house.propertyTaxAnnual ?? estimatePropertyTax({ ...house, cutEnabled: ctx.r.plan.housing.newBuildTaxCut }, 0);
+  const tax = house.propertyTaxAnnual ?? estimatePropertyTax({ ...house, cutEnabled: ctx.r.plan.housing.newBuildTaxCut }, 0, cityPlanRateOf(ctx.r.plan.assumptions.region));
   return pay + tax / 12 + house.insuranceAnnual / 12 + house.maintenanceMonthly + house.parkingMonthly;
 }
 

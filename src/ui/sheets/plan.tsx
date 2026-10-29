@@ -6,14 +6,16 @@
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
-import { CHILD_COST, CHILD_COST_SOURCE, EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE } from '../../engine/reference';
-import { childMonth, eventMonths } from '../../engine/simulate';
+import { CHILD_COST, CHILD_COST_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
+import { NATIONAL, nurseryFee, REGION_KEYS, REGIONS, type RegionKey } from '../../engine/region';
+import { resolvePlan } from '../../engine/resolve';
+import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf } from '../../engine/simulate';
 import { marginalTaxRate } from '../../engine/tax';
 import { annuityPayment } from '../../engine/loan';
 import type { Child, Debt, Insurance, Investment, LifeEvent, LivingItem, LivingStd, Owner, Person, Plan, WorkChange } from '../../engine/types';
 import { ageAt, elemStartFY, nowYM, toYM, ymYear } from '../../engine/ym';
 import { Kpi } from '../components/bits';
-import { MoneyField, NumField, Seg, TextField, Toggle, YMField } from '../components/fields';
+import { MoneyField, NumField, Pager, Seg, TextField, Toggle, useFit, usePages, YMField } from '../components/fields';
 import { ItemList } from '../components/ItemList';
 import { Sheet } from '../components/Sheet';
 import { Switcher } from '../components/Switcher';
@@ -267,7 +269,9 @@ const SCHOOL_OPTS = [
 /** 大学卒業までの教育費（いまの物価・概算） */
 function eduTotal(c: Child, p: Plan): number {
   let t = 0;
-  for (let m = c.birthYM; m < c.birthYM + 24 * 12; m++) t += childMonth(c, m, p.assumptions.childLiving).edu;
+  const r = resolvePlan(p);
+  const region = p.assumptions.region ? REGIONS[p.assumptions.region] : null;
+  for (let m = c.birthYM; m < c.birthYM + 24 * 12; m++) t += childMonth(c, m, p.assumptions.childLiving, 1, childCtxs(r, m, region).get(c.id) ?? null).edu;
   return Math.round(t);
 }
 
@@ -325,7 +329,7 @@ export function ChildEditSheet({ close, props }: SheetProps) {
         <span className="label">大学卒業までの教育費（いまの物価）</span>
         <b className="num">{yen(total)}</b>
       </div>
-      <Paged initial={(props.page as 'basic' | 'path' | 'cost' | 'edu') ?? 'basic'} pages={[{ value: 'basic', label: '基本' }, { value: 'path', label: '進路' }, { value: 'cost', label: '習い事・塾' }, { value: 'edu', label: '学資保険' }]}>
+      <Paged initial={(props.page as 'basic' | 'path' | 'cost' | 'edu' | 'basis') ?? 'basic'} pages={[{ value: 'basic', label: '基本' }, { value: 'path', label: '進路' }, { value: 'cost', label: '習い事' }, { value: 'edu', label: '学資' }, { value: 'basis', label: '根拠' }]}>
         {(page) =>
           page === 'basic' ? (
             <>
@@ -337,7 +341,7 @@ export function ChildEditSheet({ close, props }: SheetProps) {
               {c.nurseryUse && (
                 <div className="grid2">
                   <NumField label="通い始める年齢" unit="歳" min={0} max={2} nullable={false} value={c.nurseryStartAge} onChange={(v) => set((x) => void (x.nurseryStartAge = Math.round(v ?? 1)))} />
-                  <MoneyField label="保育料" per="month" hint="自治体で確認" value={c.nurseryMonthly} placeholder="未確認（3万円で仮置き）" onChange={(v) => set((x) => void (x.nurseryMonthly = v))} />
+                  <MoneyField label="保育料" per="month" hint={p.assumptions.region ? `${REGIONS[p.assumptions.region].name}の表` : '自治体で確認'} value={c.nurseryMonthly} placeholder={p.assumptions.region ? '空欄は市の表で自動' : '未確認（3万円で仮置き）'} onChange={(v) => set((x) => void (x.nurseryMonthly = v))} />
                 </div>
               )}
               <div className="micro">3〜5歳の保育料は無償化の対象です。児童手当（3歳未満 月1.5万円、高校生年代まで 月1万円、第3子以降 月3万円）は自動で収入に入ります。</div>
@@ -358,6 +362,8 @@ export function ChildEditSheet({ close, props }: SheetProps) {
             </>
           ) : page === 'edu' ? (
             <ChildEduIns c={c} />
+          ) : page === 'basis' ? (
+            <ChildCostBasis c={c} />
           ) : (
             <>
               <div className="micro" style={{ lineHeight: 1.6 }}>
@@ -368,6 +374,10 @@ export function ChildEditSheet({ close, props }: SheetProps) {
                 <MoneyField label="塾" per="month" value={c.jukuMonthly} placeholder="統計平均" onChange={(v) => set((x) => void (x.jukuMonthly = v))} />
               </div>
               <MoneyField label="その他の教育費" per="year" nullable={false} value={c.otherAnnual} onChange={(v) => set((x) => void (x.otherAnnual = v ?? 0))} />
+              <Toggle label="小1〜小3で学童保育を使う" value={!!c.afterSchool} onChange={(v) => set((x) => void (x.afterSchool = v))} />
+              {c.afterSchool && (
+                <MoneyField label="学童保育" per="month" value={c.afterSchoolMonthly ?? null} placeholder={p.assumptions.region && REGIONS[p.assumptions.region].afterSchool.annual != null ? '空欄は市の額で自動' : '月額を入力'} onChange={(v) => set((x) => void (x.afterSchoolMonthly = v))} />
+              )}
               <div className="micro">大学の費用: 国公立 入学{yen(EDU_UNIV.national.entrance)}・年{yen(EDU_UNIV.national.annual)}、私立文系 入学{yen(EDU_UNIV.privateArts.entrance)}・年{yen(EDU_UNIV.privateArts.annual)}、私立理系 入学{yen(EDU_UNIV.privateSci.entrance)}・年{yen(EDU_UNIV.privateSci.annual)}</div>
             </>
           )
@@ -394,6 +404,130 @@ function ChildEduIns({ c }: { c: Child }) {
       addLabel="学資保険を追加"
       empty="保険料は生まれた月から払込の年齢まで、祝い金・満期金は子供がその年齢になる月に収入として計算します"
     />
+  );
+}
+
+/* ============================== 住む地域・費用の根拠 ============================== */
+/** 円単位でそのまま（保育料・給食費など、表の額と照らし合わせられるように） */
+const exact = (v: number) => `${Math.round(v).toLocaleString('ja-JP')}円`;
+const srcUrl = (id: string) => SOURCES.find((x) => x.id === id)?.url ?? null;
+const SRC_MEXT = 'mext-r5';
+const SRC_JFC = 'jfc-r3';
+
+/** 根拠の1行（項目・金額・説明・出典へのリンク） */
+function BasisRow({ label, value, note, src }: { label: string; value: string; note?: string; src?: string | null }) {
+  const url = src ? srcUrl(src) : null;
+  return (
+    <div className="basis-row">
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div className="t ellipsis">{label}</div>
+        {note && <div className="micro ellipsis2">{note}</div>}
+      </div>
+      <div className="v">
+        <b className="num">{value}</b>
+        {url && (
+          <a className="micro" href={url} target="_blank" rel="noopener noreferrer">
+            出典
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** いま（とある月）の世帯の所得割額と、子供ごとの状況 */
+function useKidsCtx(p: Plan, m: number) {
+  return useMemo(() => {
+    const r = resolvePlan(p);
+    const region = p.assumptions.region ? REGIONS[p.assumptions.region] : null;
+    return { r, ctx: childCtxs(r, m, region), region };
+  }, [p, m]);
+}
+
+/** 住む地域の選択と、地域で変わる費用の一覧 */
+function RegionSection() {
+  const { p, up } = usePlan();
+  const key = p.assumptions.region ?? null;
+  const { r, region } = useKidsCtx(p, nowYM());
+  const incomeTax = householdIncomeTax(r, nowYM());
+  const set = (k: RegionKey | null) => up((pl) => void (pl.assumptions.region = k));
+  const chip = (v: RegionKey | null, label: string) => (
+    <button key={label} className={`chip${key === v ? ' on' : ''}`} aria-pressed={key === v ? 'true' : 'false'} onClick={() => set(v)}>
+      {label}
+    </button>
+  );
+  const b = region ? nurseryFee(region, incomeTax) : null;
+  const fit = useFit<HTMLDivElement>(56, 0, 2);
+  const rows = region
+    ? [
+        <BasisRow key="n" label="0〜2歳の保育料（第1子）" value={`月${exact(b!.fee)}`} note={`${b!.code}階層・世帯の所得割 約${exact(incomeTax)}（額面年収から概算）。${region.nursery.second === 'free' ? '第2子以降は無料' : '2人目は半額・3人目は無料'}`} src={region.nursery.source} />,
+        <BasisRow key="m" label="3〜5歳 保育園の給食費" value={`月${exact(region.preschoolMeal.monthly)}`} note={region.preschoolMeal.note} src={region.preschoolMeal.source} />,
+        <BasisRow key="e" label="公立小学校の給食費" value="0円" note="国の負担軽減（2026年4月〜・月5,200円まで）" src="mext-lunch-relief" />,
+        <BasisRow key="j" label="公立中学校の給食費" value={`年${exact(region.middleLunch.annual)}`} note={region.middleLunch.note} src={region.middleLunch.source} />,
+        <BasisRow key="g" label="学童保育（小1〜小3）" value={region.afterSchool.annual == null ? '要入力' : `年${exact(region.afterSchool.annual)}`} note={region.afterSchool.note} src={region.afterSchool.source} />,
+        <BasisRow key="t" label="都市計画税" value={`${(region.cityPlanRate * 100).toFixed(2)}%`} note="固定資産税1.4%と合わせて計算" src={region.cityPlanSource} />,
+      ]
+    : [
+        <BasisRow key="n" label="0〜2歳の保育料" value="月3万円" note="仮置き（市の保育料表は地域を選ぶと使います）" />,
+        <BasisRow key="m" label="3〜5歳 保育園の給食費" value={`月${exact(NATIONAL.preschoolMeal)}`} note="国の副食費の目安" src="cfa-fukushoku" />,
+        <BasisRow key="e" label="公立小学校の給食費" value="0円" note="国の負担軽減（2026年4月〜・月5,200円まで）" src="mext-lunch-relief" />,
+        <BasisRow key="j" label="公立中学校の給食費" value={`年${exact(NATIONAL.middleLunch)}`} note="子供の学習費調査の全国平均" src={SRC_MEXT} />,
+        <BasisRow key="t" label="都市計画税" value="0.30%" note="上限の税率" src="property-tax" />,
+      ];
+  const pg = usePages(rows, Math.max(2, fit.n));
+  return (
+    <>
+      <div className="field">
+        <span>住む予定の地域</span>
+        <div className="chips">
+          {chip(null, '全国平均')}
+          {REGION_KEYS.map((k) => chip(k, REGIONS[k].name))}
+        </div>
+      </div>
+      <div className="fill stack" ref={fit.ref} style={{ gap: 0 }}>
+        {pg.slice}
+      </div>
+      <Pager page={pg.page} pages={pg.pages} setPage={pg.setPage} />
+      <div className="micro">地域を選ぶと、保育料・給食費・学童・都市計画税をその市の額で計算します（確認日 2026-10-30）。</div>
+    </>
+  );
+}
+
+/** 子供1人の教育費の根拠（段階ごとの年額と出典） */
+function ChildCostBasis({ c }: { c: Child }) {
+  const { p } = usePlan();
+  const { r, region } = useKidsCtx(p, nowYM());
+  // 保育料は通い始める年齢の月の状況で示す（兄弟の順番が反映される）
+  const at = c.birthYM + c.nurseryStartAge * 12;
+  const ctxAt = childCtxs(r, Math.max(at, nowYM()), region).get(c.id) ?? null;
+  const nursery = nurseryMonthlyOf(c, ctxAt);
+  const pub = (k: 'elem' | 'middle' | 'high') => c[k] === 'public';
+  const mext = (k: 'elem' | 'middle' | 'high') => EDU_MEXT[k][c[k]];
+  const outsideNote = c.lessonsMonthly != null || c.jukuMonthly != null ? `入力した習い事・塾 月${yen((c.lessonsMonthly ?? 0) + (c.jukuMonthly ?? 0))}` : '習い事・塾は学習費調査の平均';
+  const rows = [
+    c.nurseryUse && <BasisRow key="n" label={`0〜2歳 保育料（${c.nurseryStartAge}歳から）`} value={`月${exact(nursery.fee)}`} note={nursery.how} src={c.nurseryMonthly != null ? null : region?.nursery.source} />,
+    c.kinder === 'none' ? (
+      c.nurseryUse && <BasisRow key="k" label="3〜5歳 保育園" value={`給食 月${exact(region ? region.preschoolMeal.monthly : NATIONAL.preschoolMeal)}`} note="保育料は無償化で0円。給食費（主食・副食）は実費" src={region ? region.preschoolMeal.source : 'cfa-fukushoku'} />
+    ) : (
+      <BasisRow key="k" label={`3〜5歳 ${c.kinder === 'public' ? '公立' : '私立'}幼稚園`} value={`年${exact(EDU_MEXT.kinder[c.kinder].school)}`} note={`学校の費用（給食費を含む）。${outsideNote}`} src={SRC_MEXT} />
+    ),
+    <BasisRow key="e" label={`小学校（${pub('elem') ? '公立' : '私立'}）`} value={`年${exact(pub('elem') ? mext('elem').school - EDU_LUNCH.elemPublic : mext('elem').school)}`} note={pub('elem') ? '学校の費用。給食費は国の負担軽減で0円' : '学校の費用（給食費を含む）'} src={SRC_MEXT} />,
+    <BasisRow key="m" label={`中学校（${pub('middle') ? '公立' : '私立'}）`} value={`年${exact(pub('middle') ? mext('middle').school - EDU_LUNCH.middlePublic + (region ? region.middleLunch.annual : NATIONAL.middleLunch) : mext('middle').school)}`} note={pub('middle') ? `学校の費用 年${yen(mext('middle').school - EDU_LUNCH.middlePublic)}＋給食費 年${yen(region ? region.middleLunch.annual : NATIONAL.middleLunch)}${region ? `（${region.name}）` : ''}` : '学校の費用（給食費を含む）'} src={pub('middle') && region ? region.middleLunch.source : SRC_MEXT} />,
+    <BasisRow key="h" label={`高校（${pub('high') ? '公立' : '私立'}）`} value={`年${exact(mext('high').school)}`} note="学校の費用（授業料の支援は反映していない・多めの見積もり）" src={SRC_MEXT} />,
+    c.univ !== 'none' && <BasisRow key="u" label={`大学（${UNIV_LABEL[c.univ]}）`} value={`年${exact(EDU_UNIV[c.univ].annual)}`} note={`入学費用 ${yen(EDU_UNIV[c.univ].entrance)}（高3の2月）・${c.univYears}年`} src={SRC_JFC} />,
+    c.afterSchool && <BasisRow key="g" label="学童保育（小1〜小3）" value={c.afterSchoolMonthly != null ? `月${exact(c.afterSchoolMonthly)}` : region?.afterSchool.annual != null ? `年${exact(region.afterSchool.annual)}` : '未入力'} note={c.afterSchoolMonthly != null ? '入力した額' : region ? region.afterSchool.note : '地域を選ぶか月額を入力'} src={c.afterSchoolMonthly != null ? null : region?.afterSchool.source} />,
+    <BasisRow key="o" label="習い事・塾など" value={`公立小 年${yen(mext('elem').outside)}`} note={outsideNote} src={SRC_MEXT} />,
+  ].filter(Boolean) as ReactNode[];
+  const fit = useFit<HTMLDivElement>(56, 0, 2);
+  const pg = usePages(rows, Math.max(2, fit.n));
+  return (
+    <>
+      <div className="micro">地域: {region ? region.name : '全国平均'}（「前提条件 → 住む地域」で変更）。金額はいまの物価で、毎年の物価上昇率で増やします。</div>
+      <div className="fill stack" ref={fit.ref} style={{ gap: 0 }}>
+        {pg.slice}
+      </div>
+      <Pager page={pg.page} pages={pg.pages} setPage={pg.setPage} />
+    </>
   );
 }
 
@@ -1377,15 +1511,17 @@ export const HousingSheet = ({ close, props }: SheetProps) => (
 );
 
 /* ============================== 前提条件 ============================== */
-export function AssumptionsSection({ initial }: { initial?: 'eco' | 'life' | 'kids' }) {
+export function AssumptionsSection({ initial }: { initial?: 'eco' | 'life' | 'kids' | 'region' }) {
   const { s, p, up } = usePlan();
   const a = p.assumptions;
   const set = (fn: (x: Plan['assumptions']) => void) => up((pl) => fn(pl.assumptions));
   const current = p.living.reduce((t, x) => t + x.monthly, 0);
   return (
-    <Paged initial={initial ?? 'life'} pages={[{ value: 'life', label: '老後・予備資金' }, { value: 'eco', label: '物価・運用' }, { value: 'kids', label: '子供の生活費' }]}>
+    <Paged initial={initial ?? 'life'} pages={[{ value: 'life', label: '老後・予備' }, { value: 'eco', label: '物価・運用' }, { value: 'region', label: '住む地域' }, { value: 'kids', label: '子供の生活費' }]}>
       {(page) =>
-        page === 'eco' ? (
+        page === 'region' ? (
+          <RegionSection />
+        ) : page === 'eco' ? (
           <>
             <div className="grid2">
               <NumField label="物価の上昇率（年）" unit="%" scale={100} nullable={false} value={a.inflation} onChange={(v) => set((x) => void (x.inflation = v ?? 0))} />
@@ -1423,6 +1559,6 @@ export function AssumptionsSection({ initial }: { initial?: 'eco' | 'life' | 'ki
 }
 export const AssumptionsSheet = ({ close, props }: SheetProps) => (
   <Sheet title="前提条件" onClose={close} preview foot={<Done close={close} />}>
-    <AssumptionsSection initial={props.page as 'eco' | 'life' | 'kids' | undefined} />
+    <AssumptionsSection initial={props.page as 'eco' | 'life' | 'kids' | 'region' | undefined} />
   </Sheet>
 );

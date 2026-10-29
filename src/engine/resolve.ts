@@ -1,3 +1,4 @@
+import { REGIONS } from './region';
 import { ASSUME, PENSION, RETIRE_LIVING_COUPLE } from './reference';
 import { yenText } from './text';
 import type { Owner, Plan, Yen, YM } from './types';
@@ -187,8 +188,10 @@ export function resolvePlan(plan: Plan): Resolved {
   }
 
   for (const c of plan.children) {
-    if (c.nurseryUse && c.nurseryMonthly == null)
-      assumed.push({ key: `nursery-${c.id}`, label: `${c.name || '子供'}の0〜2歳保育料`, value: `月${man(ASSUME.nurseryMonthly)}（自治体で確認を）`, impact: 'low', sheet: 'children' });
+    if (c.nurseryUse && c.nurseryMonthly == null && !a.region)
+      assumed.push({ key: `nursery-${c.id}`, label: `${c.name || '子供'}の0〜2歳保育料`, value: `月${man(ASSUME.nurseryMonthly)}（住む地域を選ぶと市の保育料表で計算）`, impact: 'low', sheet: 'assumptions' });
+    if (c.afterSchool && c.afterSchoolMonthly == null && !(a.region && REGIONS[a.region].afterSchool.annual != null))
+      assumed.push({ key: `gakudo-${c.id}`, label: `${c.name || '子供'}の学童保育`, value: '月額が未入力のため0円で計算', impact: 'low', sheet: 'children' });
   }
   if (plan.children.length > 0)
     assumed.push({ key: 'childLiving', label: '子供の生活費（食費・衣類・日用品など）', value: '年齢・学年別の全国調査の平均（2024年）を使用', impact: 'low', sheet: 'assumptions' });

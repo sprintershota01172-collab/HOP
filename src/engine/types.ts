@@ -83,6 +83,10 @@ export interface Child {
   jukuMonthly: Yen | null;
   /** その他の教育費（年） */
   otherAnnual: Yen;
+  /** 小1〜小3で学童保育（放課後児童クラブなど）を使う */
+  afterSchool?: boolean;
+  /** 学童保育の月額。null = 地域の公表額を使う */
+  afterSchoolMonthly?: Yen | null;
 }
 
 export interface LivingItem {
@@ -273,6 +277,8 @@ export interface Assumptions {
   childLiving: { preschool: Yen; elem: Yen; middleHigh: Yen; univ: Yen };
   /** 子供の生活費（食費・衣類・日用品など）を調査の平均の何倍にするか（1 = 平均） */
   childCostScale?: number;
+  /** 住む地域（保育料・給食費・学童・都市計画税が変わる）。null = 全国平均 */
+  region?: import('./region').RegionKey | null;
   /** 老後の生活費（住居費除く・月・いまの価値）。null = 統計値を仮置き */
   retireLivingMonthly: Yen | null;
   childAllowance: boolean;

@@ -49,11 +49,15 @@ export function Donut({ slices, income, size = 132, sel }: { slices: PieSlice[];
         acc += len;
         return el;
       })}
-      <text x={r} y={r - 6} textAnchor="middle" fontSize="10.5" fill="var(--ink-3)" fontFamily="var(--font)">
-        {rest.value < 0 ? '赤字' : '月の収入'}
+      {/* 真ん中はいつも「月の収入」。残額（赤字ならマイナス）はその下に小さく */}
+      <text x={r} y={r - 10} textAnchor="middle" fontSize="10" fill="var(--ink-3)" fontFamily="var(--font)">
+        月の収入
       </text>
-      <text x={r} y={r + 12} textAnchor="middle" fontSize="15" fontWeight="800" fill={rest.value < 0 ? 'var(--red)' : 'var(--ink)'} fontFamily="var(--num)">
-        {rest.value < 0 ? yen(rest.value) : yen(income)}
+      <text x={r} y={r + 6} textAnchor="middle" fontSize="15" fontWeight="800" fill="var(--ink)" fontFamily="var(--num)">
+        {yen(income)}
+      </text>
+      <text x={r} y={r + 20} textAnchor="middle" fontSize="10" fontWeight="700" fill={rest.value < 0 ? 'var(--red)' : 'var(--ink-3)'} fontFamily="var(--num)">
+        残り {rest.value >= 0 ? '+' : ''}{yen(rest.value)}
       </text>
     </svg>
   );

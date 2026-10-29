@@ -130,7 +130,7 @@
   .hide-tiny { display: none !important; }
   .app .seg.mini button { height: 22px; }
   .app .seg.mini { padding: 2px; }
-  .app .legend button.li { min-height: 20px; padding: 0 6px; }
+  .app .legend button.li.li { min-height: 17px; padding: 0 6px; }
   .app .legend .badge { width: 16px !important; height: 16px !important; }
   .app .legend .badge svg { width: 11px; height: 11px; }
   .app .donut-wrap { grid-template-columns: minmax(0, 1fr); }
@@ -662,3 +662,15 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 
 button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600; min-height: 34px; padding: 0 12px; color: var(--ink-2); }
 .chip.on { background: var(--green); color: var(--on-green); }
+
+/* 根拠の一覧（項目・金額・説明・出典） */
+.basis-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.basis-row .t { font-size: var(--fs-s); font-weight: 700; }
+.basis-row .v { display: flex; flex-direction: column; align-items: flex-end; flex: none; gap: 1px; }
+.basis-row .v b { font-size: var(--fs-s); }
+.basis-row .v a { color: var(--green); font-weight: 700; text-decoration: underline; }
+.ellipsis2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+
+/* 0円の項目は薄く（項目の数を変えず、円グラフの位置を固定する） */
+.legend button.li.zero { opacity: 0.45; }
+.donut-wrap { align-items: start; }

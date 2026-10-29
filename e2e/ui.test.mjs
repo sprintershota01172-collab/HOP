@@ -399,7 +399,7 @@ describe('入力・保存・再計算', () => {
     await page.waitForTimeout(350);
     await page.click('.sheet .item:has-text("第1子")');
     await page.waitForTimeout(350);
-    await page.locator('.sheet:not(.closing)').last().locator('.seg button:has-text("学資保険")').click();
+    await page.locator('.sheet:not(.closing)').last().locator('.seg button:has-text("学資")').click();
     await page.waitForTimeout(400);
     assert.equal(await page.locator('.sheet:not(.closing) .pane:not(.out) .item:has-text("学資保険")').count(), 1);
     assert.ok((await sheetOverflow(page)) <= 1);
@@ -495,6 +495,48 @@ describe('入力・保存・再計算', () => {
     await page.waitForTimeout(400);
     assert.match(await sheet().textContent(), /このデータで共有を始める.*届いた招待リンクで参加する/);
     assert.ok((await sheetOverflow(page)) <= 1, '共有の画面');
+    await ctx.close();
+  });
+
+  it('住む地域を選ぶと市の保育料・給食費で計算し、子供の画面に費用の根拠と出典が出る（画面に収まる）', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("前提条件")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("住む地域")').click();
+    await page.waitForTimeout(400);
+    const before = await sheet().locator('.preview .value').textContent();
+    await sheet().locator('.chip:has-text("豊田市")').click();
+    await page.waitForSelector('.sheet:not(.closing) .preview .diff', { timeout: 15000 });
+    assert.notEqual(await sheet().locator('.preview .value').textContent(), before, '地域で予算が変わる');
+    const text = await sheet().textContent();
+    assert.match(text, /D0\d階層/);
+    assert.ok((await sheet().locator('.basis-row a:has-text("出典")').count()) >= 2, '出典のリンク');
+    assert.match(await sheet().locator('.basis-row a').first().getAttribute('href'), /city\.toyota\.aichi\.jp/);
+    assert.ok((await sheetOverflow(page)) <= 1, '住む地域の画面');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await page.click('.tile:has-text("子供")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.item').first().click();
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("根拠")').click();
+    await page.waitForTimeout(500);
+    assert.match(await sheet().textContent(), /豊田市の.*階層/);
+    assert.match(await sheet().textContent(), /小学校（公立）.*給食費は国の負担軽減で0円/);
+    assert.ok((await sheetOverflow(page)) <= 1, '費用の根拠の画面');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+    // 円グラフの真ん中はいつも「月の収入」
+    await page.click('.screen .seg button:has-text("将来の家計")');
+    await page.waitForTimeout(400);
+    const center = await page.$eval('.donut-wrap svg', (e) => e.textContent);
+    assert.match(center, /月の収入.*残り/);
     await ctx.close();
   });
 
@@ -711,6 +753,7 @@ describe('招待リンクで夫婦の端末をつなぐ（ホーム画面のア�
     await nameB.press('Enter');
     await B.sheet().locator('.btn:has-text("参加する")').click();
     await B.page.waitForSelector('.toast:has-text("しょうたさんの共有データに参加しました")', { timeout: 5000 });
+    await B.page.waitForSelector('.hero .amount', { timeout: 20000 });
     await settle(B.page);
     assert.equal(await heroText(B.page), await heroText(A.page), '同じデータになる');
 

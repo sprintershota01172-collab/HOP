@@ -133,8 +133,9 @@ function Result() {
         <Switcher k={view} dir={vdir}>
         {view === 'month' && (
           <>
-            {entry.list.length > 1 && (
-              <div className="row between" style={{ flex: 'none' }}>
+            {/* 賞与のない年も同じ高さの行を置き、円グラフの位置が年によって動かないようにする */}
+            <div className="row between" style={{ flex: 'none' }}>
+              {entry.list.length > 1 ? (
                 <div className="seg mini" role="group" aria-label="どの月の収支か">
                   {entry.list.map((x) => (
                     <button key={x.kind} aria-pressed={pie.kind === x.kind ? 'true' : 'false'} onClick={() => setKind(x.kind)}>
@@ -142,14 +143,20 @@ function Result() {
                     </button>
                   ))}
                 </div>
-                <span className="micro ellipsis">{pie.kind === 'normal' ? '賞与なしの月' : pie.kind === 'bonus' ? '6・12月' : '賞与を12か月で平均'}</span>
-              </div>
-            )}
+              ) : (
+                <div className="seg mini" role="group" aria-label="どの月の収支か">
+                  <button aria-pressed="true" disabled>
+                    毎月
+                  </button>
+                </div>
+              )}
+              <span className="micro ellipsis">{entry.list.length > 1 ? (pie.kind === 'normal' ? '賞与なしの月' : pie.kind === 'bonus' ? '6・12月' : '賞与を12か月で平均') : '賞与なし・毎月同じ'}</span>
+            </div>
             <div className="donut-wrap">
               <Donut slices={pie.slices} income={pie.income} sel={cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 108 : 132} />
               <div className="legend" role="tablist" aria-label="内訳を見る項目">
-                {pie.slices.filter((x) => x.key === 'rest' || x.key === cur || Math.round(x.value) !== 0).map((x) => (
-                  <button className="li" key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
+                {pie.slices.map((x) => (
+                  <button className={`li${x.key !== 'rest' && Math.round(x.value) === 0 ? ' zero' : ''}`} key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
                     <span className="ellipsis">
                       <Badge mark={x.key === 'rest' && x.value < 0 ? { icon: 'coins', tone: 'var(--red)' } : { ...SLICE_MARK[x.key], tone: SLICE_COLOR[x.key] }} size={20} />
                       {x.label}

@@ -68,8 +68,8 @@ export interface PropertyTaxInput {
 }
 
 /** 固定資産税＋都市計画税の推計（年額）。yearIndex = 購入後何年目か（0始まり） */
-export function estimatePropertyTax(h: PropertyTaxInput, yearIndex: number): Yen {
-  const T = PROPERTY_TAX;
+export function estimatePropertyTax(h: PropertyTaxInput, yearIndex: number, cityRate: number = PROPERTY_TAX.cityRate): Yen {
+  const T = { ...PROPERTY_TAX, cityRate };
   const landEval = h.landPrice * T.landEvalRatio;
   const land = landEval * T.landFixedFactor * T.fixedRate + landEval * T.landCityFactor * T.cityRate;
   const life = h.kind === 'mansion' ? T.rcYears : T.woodYears;
