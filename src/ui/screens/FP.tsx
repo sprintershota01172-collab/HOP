@@ -139,6 +139,11 @@ function Result() {
             </div>
             <Detail key={`${cur}-${year}`} slice={pie.slices.find((x) => x.key === cur)!} rows={pie.detail[cur]} income={pie.income} months={yr.months} year={year} />
             <Happenings year={year} />
+            {pie.detail.fundPaid.length > 0 && (
+              <div className="micro ellipsis" style={{ flex: 'none' }}>
+                積立から支払い: {pie.detail.fundPaid.map((x) => `${x.label} ${yen(x.value)}`).join('、')}（この年の家計からは払いません）
+              </div>
+            )}
             {pie.withdraw > 0 && <div className="micro">投資の取崩し 月{yen(pie.withdraw)}（残額には含めていません）</div>}
           </>
         )}
@@ -147,7 +152,7 @@ function Result() {
             <div className="grid2">
               <Kpi label="収入" v={yr.income} />
               <Kpi label="支出" v={yr.spend} />
-              <Kpi label="貯蓄・投資の積立" v={yr.contrib} />
+              <Kpi label="貯蓄・投資の積立" v={yr.contrib + yr.fund} />
               <Kpi label="年間収支" v={yr.net} sign />
             </div>
             <YearBars years={fp.years} year={year} onPick={setYear} retireYear={retireY} />

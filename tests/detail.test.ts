@@ -163,3 +163,51 @@ describe('以前の版の保存データ', () => {
     assert.equal(computeAll(m).rec.final.total, computeAll(d).rec.final.total);
   });
 });
+
+describe('旅行などの逆算積立', () => {
+  const trip = (o: Partial<import('../src/engine/types').LifeEvent> = {}) => ({
+    id: uid('ev'), name: '旅行', icon: 'plane', kind: 'expense' as const, pattern: 'once' as const, amount: 600_000,
+    startYM: BASE + 24, endYM: null, everyYears: 1, inflate: false, fund: true, ...o,
+  });
+  const run = (ev: ReturnType<typeof trip>) => baseSim(withPlan(household(), (p) => void p.events.push(ev))).sim;
+  const plain = baseSim(household()).sim;
+
+  it('支払いの時期から逆算して、今月から前月まで毎月同じ額を積み立てる', () => {
+    const sim = run(trip());
+    const contrib = sim.rows.filter((x) => x.fundIn > 0);
+    assert.equal(contrib.length, 24);
+    assert.equal(contrib[0].fundIn, 25_000);
+    assert.equal(contrib.reduce((t, x) => t + x.fundIn, 0), 600_000);
+  });
+  it('支払いの月は積立から払うので、現金は減らず、積立の残高は0に戻る', () => {
+    const sim = run(trip());
+    const i = sim.rows.findIndex((x) => x.ym === BASE + 24);
+    assert.equal(sim.rows[i].fundOut, 600_000);
+    assert.equal(sim.rows[i].otherExpense, 0);
+    assert.equal(sim.rows[i].fund, 0);
+    assert.equal(sim.rows[i - 1].fund, 600_000);
+    // 積立をしない場合と比べて、支払い後の現金は同じ
+    assert.equal(sim.rows[i].cash, plain.rows[i].cash - 600_000);
+  });
+  it('数年ごとの支出は、前回の支払いの翌月から次の支払いの前月までで積み立てる', () => {
+    const sim = run(trip({ pattern: 'repeat', everyYears: 2, startYM: BASE + 12, endYM: BASE + 12 + 48 }));
+    const pays = sim.rows.filter((x) => x.fundOut > 0).map((x) => x.ym);
+    assert.deepEqual(pays, [BASE + 12, BASE + 36, BASE + 60]);
+    const between = sim.rows.filter((x) => x.ym > BASE + 12 && x.ym < BASE + 36 && x.fundIn > 0).length;
+    assert.equal(between, 23);
+  });
+  it('積立をしない設定なら、その月の支出として現金から払う', () => {
+    const sim = run(trip({ fund: false }));
+    const i = sim.rows.findIndex((x) => x.ym === BASE + 24);
+    assert.equal(sim.rows[i].otherExpense, 600_000);
+    assert.equal(sim.rows.every((x) => x.fundIn === 0), true);
+  });
+  it('円グラフでは「貯蓄・投資」に積立として出て、内訳の合計も一致する', () => {
+    const d = withPlan(household(), (p) => void p.events.push(trip()));
+    const c = computeAll(d);
+    const det = pieDetails(c.fp!.sim, c.fp!.years);
+    assert.ok(det[1].saving.some((x) => x.label === '旅行の積立'));
+    const y = c.fp!.years.findIndex((x) => x.year === Math.floor((BASE + 24) / 12));
+    assert.ok(det[y].fundPaid.some((x) => x.label === '旅行' && x.value === 600_000));
+  });
+});

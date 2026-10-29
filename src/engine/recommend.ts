@@ -104,13 +104,14 @@ export function checkTier(r: Resolved, sim: SimResult, tier: TierKey): Fail | nu
       if (row.cash < floor) return { ym: row.ym, kind: floor > 0 ? 'reserve' : 'short', cash: row.cash, floor, driver: driverOf(sim, i) };
     } else {
       const care = terminal * Math.pow(1 + a.inflation, ymYear(row.ym) - baseYear);
-      if (row.cash < 0 || row.cash + row.invest < care) {
-        return { ym: row.ym, kind: 'depleted', cash: row.cash + row.invest, floor: Math.round(care), driver: driverOf(sim, i) };
+      // 老後は目的別の積立も手元のお金として数える
+      if (row.cash + row.fund < 0 || row.cash + row.fund + row.invest < care) {
+        return { ym: row.ym, kind: 'depleted', cash: row.cash + row.fund + row.invest, floor: Math.round(care), driver: driverOf(sim, i) };
       }
     }
     for (const x of goals) {
-      if (x.i === i && row.cash + row.invest < x.g.target) {
-        return { ym: row.ym, kind: 'goal', cash: row.cash + row.invest, floor: x.g.target, driver: `貯蓄目標「${x.g.name}」${yenText(x.g.target)}` };
+      if (x.i === i && row.cash + row.fund + row.invest < x.g.target) {
+        return { ym: row.ym, kind: 'goal', cash: row.cash + row.fund + row.invest, floor: x.g.target, driver: `貯蓄目標「${x.g.name}」${yenText(x.g.target)}` };
       }
     }
   }
@@ -393,12 +394,12 @@ export function metricsOf(ctx: Context, sim: SimResult): Metrics {
   const initial = ctx.r.people.reduce((s, x) => s + x.cash, 0) + ctx.r.plan.investments.reduce((s, x) => s + x.balance, 0);
   const at = (i: number) => {
     const row = rows[Math.min(rows.length - 1, Math.max(0, i))];
-    return row ? row.cash + row.invest : 0;
+    return row ? row.cash + row.fund + row.invest : 0;
   };
   return {
     monthlyHousing: Math.round(avg(after, (x) => x.housing)),
     loanMonthly: sched ? sched.firstMonthly : 0,
-    surplus5y: Math.round(avg(five, (x) => incomeOf(x) - spendOf(x) - x.contrib)),
+    surplus5y: Math.round(avg(five, (x) => incomeOf(x) - spendOf(x) - x.contrib - x.fundIn)),
     savingsNow: initial,
     savingsAtPurchase: at(p),
     savings10y: at(120),

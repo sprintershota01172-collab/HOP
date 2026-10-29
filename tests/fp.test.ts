@@ -194,10 +194,10 @@ describe('お金の流れの整合性', () => {
   const t = tryLoan(ctx, 35_000_000, 'standard', ctx.sc.base);
   const rows = t.sim.rows;
 
-  it('現金の増減 = 収入 − 支出 − 積立 + 取崩し − 税（毎月、円単位で一致）', () => {
+  it('現金の増減 = 収入 − 支出 − 積立（投資・目的別） + 取崩し − 税（毎月、円単位で一致）', () => {
     let prev = 4_000_000 + 1_000_000;
     for (const row of rows) {
-      const expected = prev + incomeOf(row) - spendOf(row) - row.contrib + row.withdraw + row.autoWithdraw - row.invTax;
+      const expected = prev + incomeOf(row) - spendOf(row) - row.contrib - row.fundIn + row.withdraw + row.autoWithdraw - row.invTax;
       assert.equal(row.cash, expected, `ym ${row.ym}`);
       prev = row.cash;
     }

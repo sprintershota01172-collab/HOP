@@ -57,6 +57,9 @@ const html = `<!doctype html>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" media="print" onload="this.media='all'">
 <style>${minCss}</style>
 </head>
 <body>
@@ -101,10 +104,17 @@ await writeFile(
 const CACHE = 'hoppo-${hash}';
 const FILES = ${JSON.stringify(precache)};
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting())); });
-self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith('hoppo-') && k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
+self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k.startsWith('hoppo-') && k !== CACHE && k !== 'hoppo-fonts').map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  if (req.method !== 'GET') return;
+  const host = new URL(req.url).hostname;
+  // 文字（Google Fonts）は一度読み込んだら端末に保存して、オフラインでも同じ文字で表示する
+  if (host === 'fonts.googleapis.com' || host === 'fonts.gstatic.com') {
+    e.respondWith(caches.open('hoppo-fonts').then((c) => c.match(req).then((hit) => hit || fetch(req).then((r) => { if (r.ok || r.type === 'opaque') c.put(req, r.clone()); return r; }))));
+    return;
+  }
+  if (new URL(req.url).origin !== location.origin) return;
   // 画面（HTML）は新しい版を優先し、オフラインならキャッシュ。その他はキャッシュ優先。
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).then((r) => { const c = r.clone(); caches.open(CACHE).then((cc) => cc.put('./index.html', c)); return r; }).catch(() => caches.match('./index.html')));
@@ -120,6 +130,9 @@ await writeFile(out('pages', '.nojekyll'), '');
 // 公開時の雛形が :root を安全領域の分だけ余白にするため、アプリ側の上下の安全領域は 0 にする
 const artifact = `<title>ほっぽさん</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" media="print" onload="this.media='all'">
 <style>${minCss}
 :root{--safe-top:0px;--safe-bottom:0px}</style>
 <div id="root"></div>

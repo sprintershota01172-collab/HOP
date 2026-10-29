@@ -29,8 +29,8 @@
   --c-rest: #e7dfd1;
   --c-home: #d9c9ac;
 
-  --font: 'Meiryo UI', Meiryo, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI', 'Noto Sans JP', system-ui, sans-serif;
-  --num: ui-rounded, 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', 'Meiryo UI', 'Noto Sans JP', system-ui, sans-serif;
+  --font: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'M PLUS Rounded 1c', 'Meiryo UI', Meiryo, 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  --num: ui-rounded, 'SF Pro Rounded', 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Meiryo UI', 'Noto Sans JP', system-ui, sans-serif;
   --fs-xs: 11px;
   --fs-s: 12.5px;
   --fs-m: 14px;

@@ -20,6 +20,10 @@ export interface YearRow {
   otherExpense: Yen;
   spend: Yen;
   contrib: Yen;
+  /** 目的別の積立（旅行など） */
+  fund: Yen;
+  /** 積立から払った支出 */
+  fundOut: Yen;
   withdraw: Yen;
   gain: Yen;
   invTax: Yen;
@@ -43,7 +47,7 @@ export function toYears(sim: SimResult): YearRow[] {
     if (!cur || cur.year !== y) {
       cur = {
         year: y, months: 0, income: 0, salary: 0, bonus: 0, benefit: 0, pension: 0, allowance: 0, otherIncome: 0,
-        living: 0, housing: 0, education: 0, insurance: 0, debt: 0, otherExpense: 0, spend: 0, contrib: 0, withdraw: 0,
+        living: 0, housing: 0, education: 0, insurance: 0, debt: 0, otherExpense: 0, spend: 0, contrib: 0, fund: 0, fundOut: 0, withdraw: 0,
         gain: 0, invTax: 0, net: 0, cashEnd: 0, investEnd: 0, loanEnd: 0, homeValue: 0, netWorth: 0,
       };
       out.push(cur);
@@ -64,11 +68,14 @@ export function toYears(sim: SimResult): YearRow[] {
     cur.otherExpense += r.otherExpense;
     cur.spend += spendOf(r);
     cur.contrib += r.contrib;
+    cur.fund += r.fundIn;
+    cur.fundOut += r.fundOut;
     cur.withdraw += r.withdraw + r.autoWithdraw;
     cur.gain += r.gain;
     cur.invTax += r.invTax;
-    cur.net = cur.income - cur.spend - cur.contrib;
-    cur.cashEnd = r.cash;
+    cur.net = cur.income - cur.spend - cur.contrib - cur.fund;
+    // 現金には目的別の積立（銀行に置いたまま）を含めて表示する
+    cur.cashEnd = r.cash + r.fund;
     cur.investEnd = r.invest;
     cur.loanEnd = r.loanBalance;
     if (p && r.ym >= p.ym) {
@@ -89,7 +96,7 @@ export interface PieSlice {
 }
 
 /** その年の「平均的な1か月」の内訳。合計は必ず月平均の収入と一致する */
-export function monthPie(y: YearRow): { income: Yen; slices: PieSlice[]; withdraw: Yen } {
+export function monthPie(y: YearRow): { income: Yen; slices: PieSlice[]; withdraw: Yen; fundOut: Yen } {
   const n = Math.max(1, y.months);
   const income = Math.round(y.income / n);
   const items: PieSlice[] = [
@@ -97,12 +104,12 @@ export function monthPie(y: YearRow): { income: Yen; slices: PieSlice[]; withdra
     { key: 'housing', label: '住宅費', value: Math.round(y.housing / n) },
     { key: 'education', label: '教育費', value: Math.round(y.education / n) },
     { key: 'insurance', label: '保険', value: Math.round(y.insurance / n) },
-    { key: 'saving', label: '貯蓄・投資', value: Math.round(y.contrib / n) },
+    { key: 'saving', label: '貯蓄・投資', value: Math.round((y.contrib + y.fund) / n) },
     { key: 'other', label: 'その他支出', value: Math.round((y.debt + y.otherExpense) / n) },
   ];
   const used = items.reduce((s, x) => s + x.value, 0);
   items.push({ key: 'rest', label: '残額', value: income - used });
-  return { income, slices: items, withdraw: Math.round(y.withdraw / n) };
+  return { income, slices: items, withdraw: Math.round(y.withdraw / n), fundOut: Math.round(y.fundOut / n) };
 }
 
 /** 円グラフの項目の内訳の1行（月平均） */
@@ -117,7 +124,8 @@ export interface DetailRow {
   /** 一時的な支出・収入を12か月で平均したもの */
   once?: boolean;
 }
-export type PieDetail = Record<PieSlice['key'], DetailRow[]>;
+/** fundPaid: その年に積立から払った支出（年の合計） */
+export type PieDetail = Record<PieSlice['key'], DetailRow[]> & { fundPaid: DetailRow[] };
 
 const SLICE_CAT: Record<Exclude<PieSlice['key'], 'rest'>, PartCat> = {
   living: 'living', housing: 'housing', education: 'education', insurance: 'insurance', saving: 'saving', other: 'other',
@@ -161,6 +169,7 @@ export function pieDetails(sim: SimResult, years: YearRow[]): PieDetail[] {
     const rest = pie.slices.find((x) => x.key === 'rest')!;
     const income = fit(sums.get('income'), pie.income).map((r) => ({ ...r, op: '+' as const }));
     d.rest = [...income, { key: 'spent', label: '支出と積立の合計', value: pie.income - rest.value, op: '−', sheet: '' }];
+    d.fundPaid = (sums.get('fundPaid') ?? []).map((r) => ({ ...r, value: Math.round(r.value * n) }));
     out.push(d);
     i0 += y.months;
   }

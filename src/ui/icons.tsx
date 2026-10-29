@@ -32,6 +32,9 @@ const P: Record<string, string> = {
   upload: 'M12 20V9M7 14l5-5 5 5M5 4h14',
   food: 'M7 3v8M5 3v5a2 2 0 0 0 4 0V3M7 11v10M17 3c-2 0-3 3-3 6s1 4 3 4v8',
   bolt: 'M13 3 5 14h6l-1 7 8-11h-6l1-7Z',
+  drop: 'M12 3s-6 6.8-6 11a6 6 0 0 0 12 0c0-4.2-6-11-6-11Z',
+  flame: 'M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2.6 1.5-4 2.5-5.5.3 2 1.2 3 2.5 3.5C11 9 11 6 12 3Z',
+  piggy: 'M5 11a7 6 0 0 1 12.5-3.5H20v4l-1.5 1A7 6 0 0 1 15 17v2h-2.5v-1.5h-3V19H7v-2.3A6 6 0 0 1 5 11ZM15 10h0M10 7h3',
   phone: 'M8 3h8v18H8zM11 18h2',
   car: 'M5 16h14M6 16l1.5-5h9L18 16M6 16v3M18 16v3M8 13.5h0M16 13.5h0',
   fuel: 'M5 21V5h8v16M5 11h8M13 8l4 3v7a1.5 1.5 0 0 0 3 0V9l-3-3',
@@ -73,6 +76,6 @@ export function RoofMark() {
   );
 }
 
-export const LIVING_ICONS = ['food', 'basket', 'bolt', 'phone', 'car', 'fuel', 'medical', 'shirt', 'smile', 'plane', 'wallet', 'dots'];
+export const LIVING_ICONS = ['food', 'basket', 'bolt', 'drop', 'flame', 'phone', 'car', 'fuel', 'medical', 'shirt', 'smile', 'plane', 'wallet', 'dots'];
 export const EVENT_ICONS = ['ring', 'plane', 'baby', 'car', 'house', 'tool', 'briefcase', 'flag', 'coins', 'dots'];
 

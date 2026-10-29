@@ -43,6 +43,8 @@ export interface Debt {
   name: string;
   monthly: Yen;
   endYM: YM;
+  /** 決まった入力欄の借入（'car' = 自動車ローン） */
+  std?: 'car';
 }
 
 export type SchoolChoice = 'public' | 'private';
@@ -81,9 +83,12 @@ export interface LivingItem {
   icon: string;
   monthly: Yen;
   kind: 'fixed' | 'variable';
-  /** 「まとめて入力」で作った合計の項目（項目ごとの入力とは同時に使わない） */
+  /** 「その他の生活費（まとめて）」の項目 */
   lump?: boolean;
+  /** 決まった入力欄の項目（食費・電気代・水道代・ガス代・携帯代） */
+  std?: LivingStd;
 }
+export type LivingStd = 'food' | 'electric' | 'water' | 'gas' | 'phone';
 
 export type InsuranceKind = 'life' | 'medical' | 'cancer' | 'education' | 'annuity' | 'other';
 export type Payout =
@@ -151,6 +156,8 @@ export interface LifeEvent {
   /** repeat の間隔（年） */
   everyYears: number;
   inflate: boolean;
+  /** 支出の時期から逆算して毎月積み立て、その積立から払う（1回だけ・数年ごとの支出） */
+  fund?: boolean;
 }
 
 export interface WorkChange {

@@ -113,6 +113,8 @@ function flowLines(win: MonthRow[], per: (v: number) => number): { lines: BreakL
   lines.push({ key: 'upkeep', label: '住宅維持費（税・保険・修繕）', value: per(upkeep), op: '−', sheet: 'housing' });
   if (rent) lines.push({ key: 'rent', label: '家賃（引越しまでの重複）', value: per(rent), op: '−', sheet: 'housing' });
   if (invest) lines.push({ key: 'invest', label: invest > 0 ? 'NISAなどの積立' : '投資の取り崩し', value: per(Math.abs(invest)), op: invest > 0 ? '−' : '+', sheet: 'invest' });
+  const fund = sumRows(win, (x) => x.fundIn);
+  if (fund) lines.push({ key: 'fund', label: '旅行などの積立（時期から逆算）', value: per(fund), op: '−', sheet: 'events' });
 
   return { lines, eduOnce };
 }

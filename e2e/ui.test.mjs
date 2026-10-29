@@ -21,6 +21,8 @@ after(async () => {
 
 async function open(size = [375, 667], scheme = 'light') {
   const ctx = await browser.newContext({ viewport: { width: size[0], height: size[1] }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: scheme });
+  // 外部の文字（Google Fonts）は検証環境では読めないため、空で返す
+  await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -240,7 +242,7 @@ describe('入力・保存・再計算', () => {
     await money('現金・預金', '500');
     await next();
     // 3 生活費
-    await money('毎月の生活費', '15');
+    await money('食費', '15');
     await next();
     // 4 住まい・購入時期
     await money('家賃', '7');
@@ -262,7 +264,7 @@ describe('入力・保存・再計算', () => {
     const checks = [
       ['収入', '手取り月収', '35'],
       ['貯蓄', '現金・預金', '500'],
-      ['生活費', '毎月の生活費', '15'],
+      ['生活費', '食費', '15'],
       ['住まい', '家賃', '7', 'いまの住まい'],
     ];
     for (const [tile, label, v, pg] of checks) {
@@ -390,6 +392,39 @@ describe('入力・保存・再計算', () => {
     await page.waitForTimeout(400);
     assert.equal(await page.locator('.sheet:not(.closing) .pane:not(.out) .item:has-text("学資保険")').count(), 1);
     assert.ok((await sheetOverflow(page)) <= 1);
+    await ctx.close();
+  });
+
+  it('生活費（電気・水道・ガス・食費・携帯）・車のローン・旅行の逆算積立を入力でき、画面に収まる', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("生活費")');
+    await page.waitForTimeout(400);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    const field = (label) => sheet().locator(`.field:has-text("${label}"):not(.pane.out .field)`).first();
+    for (const k of ['食費', '電気代', '水道代', 'ガス代', '携帯代', 'その他の生活費']) assert.equal(await field(k).count(), 1, k);
+    const before = await sheet().locator('.preview .value').textContent();
+    const el = field('電気代').locator('input');
+    await el.fill('1.5');
+    await el.press('Enter');
+    await page.waitForSelector('.sheet:not(.closing) .preview .diff', { timeout: 15000 });
+    assert.notEqual(await sheet().locator('.preview .value').textContent(), before);
+    assert.ok((await sheetOverflow(page)) <= 1, '生活費の画面');
+    await sheet().locator('.seg button:has-text("車のローン")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await field('自動車ローン').locator('input').inputValue(), '1.5', 'サンプルの車のローンが同じ欄に出る');
+    assert.ok((await sheetOverflow(page)) <= 1, '車のローンの画面');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 旅行: 時期から逆算した毎月の積立
+    await page.click('.tile:has-text("イベント")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.btn:has-text("家族旅行")').click();
+    await page.waitForTimeout(400);
+    assert.match(await sheet().locator('.card.flat').textContent(), /あと\d+か月.*毎月/);
+    assert.ok((await sheetOverflow(page)) <= 1, 'イベントの画面');
     await ctx.close();
   });
 

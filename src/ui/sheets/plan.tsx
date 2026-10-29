@@ -5,10 +5,10 @@
  */
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
-import { emptyPerson, LIVING_PRESETS, newChild, uid } from '../../engine/defaults';
+import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
 import { EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE } from '../../engine/reference';
-import { childMonth } from '../../engine/simulate';
-import type { Child, Insurance, Investment, LifeEvent, LivingItem, Owner, Person, Plan, WorkChange } from '../../engine/types';
+import { childMonth, eventMonths } from '../../engine/simulate';
+import type { Child, Debt, Insurance, Investment, LifeEvent, LivingItem, LivingStd, Owner, Person, Plan, WorkChange } from '../../engine/types';
 import { ageAt, nowYM, ymYear } from '../../engine/ym';
 import { Kpi } from '../components/bits';
 import { MoneyField, NumField, Seg, TextField, Toggle, YMField } from '../components/fields';
@@ -339,11 +339,57 @@ function ChildEduIns({ c }: { c: Child }) {
 /** 「まとめて入力」の項目か（以前の版の「生活費（合計）」も同じ扱い） */
 export const isLump = (x: LivingItem) => !!x.lump || x.name === '生活費（合計）';
 
-export function LivingSection({ initial }: { initial?: 'base' | 'pocket' } = {}) {
+export function LivingSection({ initial }: { initial?: 'base' | 'pocket' | 'car' } = {}) {
   return (
-    <Paged initial={initial ?? 'base'} pages={[{ value: 'base', label: '生活費' }, { value: 'pocket', label: 'お小遣い・自由費' }]}>
-      {(page) => (page === 'base' ? <LivingBase /> : <PocketSection />)}
+    <Paged initial={initial ?? 'base'} pages={[{ value: 'base', label: '生活費' }, { value: 'pocket', label: 'お小遣い・自由費' }, { value: 'car', label: '車のローン' }]}>
+      {(page) => (page === 'base' ? <LivingBase /> : page === 'pocket' ? <PocketSection /> : <CarLoanSection />)}
     </Paged>
+  );
+}
+
+/** 自動車ローン（以前の版で「車のローン」などの名前で入れた借入も同じものとして扱う） */
+const findCar = (ds: Debt[]) => ds.find((d) => d.std === 'car') ?? ds.find((d) => !d.std && /車|カー/.test(d.name));
+
+export function CarLoanSection() {
+  const { s, p, up } = usePlan();
+  const car = findCar(p.debts);
+  const others = p.debts.filter((d) => d !== car);
+  const set = (fn: (d: Debt) => void, create = false) =>
+    up((pl) => {
+      let d = findCar(pl.debts);
+      if (!d && create) {
+        d = { id: uid('debt'), name: '自動車ローン', monthly: 0, endYM: nowYM() + 60, std: 'car' };
+        pl.debts.push(d);
+      }
+      if (d) fn(d);
+    });
+  return (
+    <>
+      <div className="grid2">
+        <MoneyField
+          label="自動車ローン"
+          hint="毎月の返済"
+          per="month"
+          value={car ? car.monthly : null}
+          placeholder="なし"
+          onChange={(v) => (v == null ? up((pl) => void (pl.debts = pl.debts.filter((d) => d !== findCar(pl.debts)))) : set((d) => void ((d.monthly = v), (d.std = 'car')), true))}
+        />
+        {car ? <YMField label="返済の終わり" nullable={false} value={car.endYM} onChange={(v) => v != null && set((d) => void (d.endYM = v))} from={THIS_YEAR} to={THIS_YEAR + 15} /> : <div />}
+      </div>
+      <div className="micro" style={{ lineHeight: 1.6 }}>
+        ボーナス払いがある場合は、年間のボーナス払いの合計 ÷ 12 を毎月の返済に足して入力してください。ガソリン・保険・車検などは「生活費」の「そのほかの項目」に入れます。
+      </div>
+      <button className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'savings' })}>
+        <span className="ic">
+          <Icon name="coins" />
+        </span>
+        <div className="grow">
+          <div className="t ellipsis">ほかの借入（奨学金など）</div>
+          <div className="micro ellipsis">{others.length ? `${others.length}件・月${yen(others.reduce((t, d) => t + d.monthly, 0))}` : 'なし'}</div>
+        </div>
+        <Icon name="right" size={16} />
+      </button>
+    </>
   );
 }
 
@@ -371,95 +417,85 @@ export function PocketSection() {
   );
 }
 
+/** 決まった入力欄の項目を探す（以前の版で同じ名前で作った項目も同じものとして扱う） */
+const findStd = (items: LivingItem[], std: LivingStd) => {
+  const def = LIVING_STD.find((x) => x.std === std)!;
+  return items.find((x) => x.std === std) ?? items.find((x) => !x.std && !isLump(x) && x.name === def.name);
+};
+const isStdItem = (items: LivingItem[], x: LivingItem) => LIVING_STD.some((d) => findStd(items, d.std) === x);
+
+/** 生活費: 食費・電気代・水道代・ガス代・携帯代は個別の欄、そのほかは項目を追加するか「その他」にまとめて入力 */
 function LivingBase() {
   const { s, p, up } = usePlan();
   const items = p.living;
-  const lumpItem = items.length === 1 && isLump(items[0]) ? items[0] : null;
-  const derived: 'lump' | 'items' = items.length === 0 || lumpItem ? 'lump' : 'items';
-  const [want, setWant] = useState<'lump' | 'items' | null>(null);
-  const mode = items.length === 0 && want ? want : derived;
+  const lump = items.find(isLump);
+  const others = items.filter((x) => !isLump(x) && !isStdItem(items, x));
   const total = items.reduce((t, x) => t + x.monthly, 0);
-  const fixed = items.filter((x) => x.kind === 'fixed').reduce((t, x) => t + x.monthly, 0);
-  const toItems = () => {
-    if (lumpItem) up((pl) => void (pl.living = [{ ...lumpItem, name: 'その他', icon: 'dots', lump: false }]));
-    setWant('items');
-  };
-  const toLump = () => {
-    if (items.length <= 1) {
-      if (items[0]) up((pl) => void (pl.living = [{ ...items[0], name: '生活費（まとめて）', icon: 'basket', lump: true }]));
-      setWant('lump');
-      return;
-    }
-    s.open({
-      kind: 'confirm',
-      props: {
-        title: '項目を1つにまとめますか？',
-        body: `${items.length}項目を合計 ${yen(total)}/月 の1項目にまとめます。項目ごとの金額は消えます（直後なら「元に戻す」で戻せます）。`,
-        ok: 'まとめる',
-        run: () => {
-          up((pl) => void (pl.living = [{ id: uid('liv'), name: '生活費（まとめて）', icon: 'basket', monthly: total, kind: 'variable', lump: true }]));
-          setWant('lump');
-        },
-      },
+  const setStd = (std: LivingStd, v: number | null) =>
+    up((pl) => {
+      const def = LIVING_STD.find((x) => x.std === std)!;
+      const cur = findStd(pl.living, std);
+      if (v == null) pl.living = pl.living.filter((x) => x !== cur);
+      else if (cur) Object.assign(cur, { monthly: v, std });
+      else pl.living.push({ id: uid('liv'), name: def.name, icon: def.icon, monthly: v, kind: def.kind, std });
     });
-  };
+  const setLump = (v: number | null) =>
+    up((pl) => {
+      const cur = pl.living.find(isLump);
+      if (v == null) pl.living = pl.living.filter((x) => x !== cur);
+      else if (cur) cur.monthly = v;
+      else pl.living.push({ id: uid('liv'), name: 'その他の生活費', icon: 'basket', monthly: v, kind: 'variable', lump: true });
+    });
   return (
     <>
-      <div className="seg" role="group" aria-label="生活費の入力方法">
-        <button aria-pressed={mode === 'lump' ? 'true' : 'false'} onClick={() => mode !== 'lump' && toLump()}>
-          まとめて入力
-        </button>
-        <button aria-pressed={mode === 'items' ? 'true' : 'false'} onClick={() => mode !== 'items' && toItems()}>
-          項目ごとに入力
-        </button>
+      <div className="grid2">
+        {LIVING_STD.map((d) => (
+          <MoneyField key={d.std} label={d.name} per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
+        ))}
+        <MoneyField label="その他の生活費" hint="まとめて" per="month" value={lump ? lump.monthly : null} placeholder="未入力" onChange={setLump} />
       </div>
-      <Switcher k={mode} dir={mode === 'items' ? 1 : -1}>
-        {mode === 'lump' ? (
-          <>
-            <MoneyField
-              label="毎月の生活費（合計）"
-              per="month"
-              required
-              value={lumpItem ? lumpItem.monthly : null}
-              onChange={(v) =>
-                up((pl) => {
-                  if (v == null) pl.living = [];
-                  else if (lumpItem) pl.living = [{ ...lumpItem, monthly: v }];
-                  else pl.living = [{ id: uid('liv'), name: '生活費（まとめて）', icon: 'basket', monthly: v, kind: 'variable', lump: true }];
-                })
-              }
-            />
-            <LivingNote />
-          </>
-        ) : (
-          <>
-            <div className="card flat grid3">
-              <Kpi label="固定費" v={fixed} />
-              <Kpi label="変動費" v={total - fixed} />
-              <Kpi label="合計（月）" v={total} />
-            </div>
-            <ItemList
-              per={3}
-              rows={items.map((x) => ({ id: x.id, icon: x.icon, title: x.name, sub: x.kind === 'fixed' ? '固定費' : '変動費', right: <b className="num">{yen(x.monthly)}</b> }))}
-              onPick={(id) => s.open({ kind: 'livingEdit', props: { id } })}
-              onAdd={() => s.open({ kind: 'livingAdd' })}
-              addLabel="項目を追加"
-            />
-            <LivingNote />
-          </>
-        )}
-      </Switcher>
+      <button className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'livingItems' })}>
+        <span className="ic">
+          <Icon name="plus" />
+        </span>
+        <div className="grow">
+          <div className="t ellipsis">そのほかの項目（日用品・車関連など）</div>
+          <div className="micro ellipsis">{others.length ? `${others.length}件・月${yen(others.reduce((t, x) => t + x.monthly, 0))}` : '項目ごとに分けたいときに追加'}</div>
+        </div>
+        <Icon name="right" size={16} />
+      </button>
+      <div className="row between">
+        <span className="micro">生活費の合計</span>
+        <b className="num">月{yen(total)}</b>
+      </div>
+      <div className="micro" style={{ lineHeight: 1.5 }}>
+        家賃・ローン・保険・教育費・積立は別の画面で入力します（ここに入れると二重に数えます）。子供の分は年齢に合わせて自動で加えます。
+      </div>
     </>
   );
 }
-const LivingNote = () => (
-  <div className="micro" style={{ lineHeight: 1.6 }}>
-    家賃・住宅ローン・保険料・教育費・NISAなどの積立・いまある借入の返済は、それぞれの項目で入力します（ここに入れると二重に数えます）。子供の分の生活費は年齢に合わせて自動で加えます。
-  </div>
-);
+
+/** そのほかの生活費の項目 */
+export function LivingItemsSheet({ close }: SheetProps) {
+  const { s, p } = usePlan();
+  const items = p.living.filter((x) => !isLump(x) && !isStdItem(p.living, x));
+  return (
+    <Sheet title="そのほかの生活費の項目" onClose={close} preview foot={<Done close={close} />}>
+      <ItemList
+        per={5}
+        rows={items.map((x) => ({ id: x.id, icon: x.icon, title: x.name, sub: x.kind === 'fixed' ? '固定費' : '変動費', right: <b className="num">{yen(x.monthly)}</b> }))}
+        onPick={(id) => s.open({ kind: 'livingEdit', props: { id } })}
+        onAdd={() => s.open({ kind: 'livingAdd' })}
+        addLabel="項目を追加"
+        empty="日用品・車関連費・ガソリン・被服費など、項目ごとに分けて入力できます"
+      />
+    </Sheet>
+  );
+}
+
 export const LivingSheet = ({ close, props }: SheetProps) => (
   <Sheet title="毎月の生活費" onClose={close} preview foot={<Done close={close} />}>
-    <LivingSection initial={props?.page === 'pocket' ? 'pocket' : 'base'} />
+    <LivingSection initial={props?.page === 'pocket' || props?.page === 'car' ? props.page : 'base'} />
   </Sheet>
 );
 
@@ -821,6 +857,20 @@ export function GoalEditSheet({ close, props }: SheetProps) {
 }
 
 /* ============================== ライフイベント ============================== */
+/** 逆算した積立（次の支出まで、毎月いくら積み立てるか。物価の上昇を含む目安） */
+export function fundInfo(e: LifeEvent, p: Plan): { next: number; months: number; amount: number; monthly: number } | null {
+  if (!e.fund || e.kind !== 'expense' || e.pattern === 'monthly') return null;
+  const now = nowYM();
+  const all = eventMonths(e, Math.min(now, e.startYM), now + 12 * 80);
+  const next = all.find((m) => m > now);
+  if (next == null) return null;
+  const prev = [...all].reverse().find((m) => m <= now);
+  const from = prev != null ? prev + 1 : now;
+  const months = Math.max(1, next - from);
+  const amount = e.inflate ? e.amount * Math.pow(1 + p.assumptions.inflation, ymYear(next) - ymYear(now)) : e.amount;
+  return { next, months, amount, monthly: Math.round(amount / months) };
+}
+
 const EVENT_PRESETS: { name: string; icon: string; pattern: LifeEvent['pattern']; amount: number; every?: number }[] = [
   { name: '結婚式', icon: 'ring', pattern: 'once', amount: 3_000_000 },
   { name: '新婚旅行', icon: 'plane', pattern: 'once', amount: 800_000 },
@@ -833,14 +883,14 @@ export function EventsSection() {
   const { s, p, up } = usePlan();
   const add = (x: (typeof EVENT_PRESETS)[number] | null) => {
     const id = uid('ev');
-    up((pl) => void pl.events.push({ id, name: x?.name ?? 'イベント', icon: x?.icon ?? 'flag', kind: 'expense', pattern: x?.pattern ?? 'once', amount: x?.amount ?? 500_000, startYM: nowYM() + 12, endYM: null, everyYears: x?.every ?? 5, inflate: true }));
+    up((pl) => void pl.events.push({ id, name: x?.name ?? 'イベント', icon: x?.icon ?? 'flag', kind: 'expense', pattern: x?.pattern ?? 'once', amount: x?.amount ?? 500_000, startYM: nowYM() + 12, endYM: null, everyYears: x?.every ?? 5, inflate: true, fund: true }));
     s.open({ kind: 'eventEdit', props: { id } });
   };
   return (
     <>
       <ItemList
         per={4}
-        rows={p.events.map((e) => ({ id: e.id, icon: e.icon, title: e.name, sub: `${ymText(e.startYM)}${e.pattern === 'repeat' ? `から${e.everyYears}年ごと` : e.pattern === 'monthly' ? 'から毎月' : ''}`, right: <b className={`num ${e.kind === 'income' ? 'pos' : ''}`}>{e.kind === 'income' ? '+' : ''}{yen(e.amount)}</b> }))}
+        rows={p.events.map((e) => ({ id: e.id, icon: e.icon, title: e.name, sub: `${ymText(e.startYM)}${e.pattern === 'repeat' ? `から${e.everyYears}年ごと` : e.pattern === 'monthly' ? 'から毎月' : ''}${fundInfo(e, p) ? `・月${yen(fundInfo(e, p)!.monthly)}積立` : ''}`, right: <b className={`num ${e.kind === 'income' ? 'pos' : ''}`}>{e.kind === 'income' ? '+' : ''}{yen(e.amount)}</b> }))}
         onPick={(id) => s.open({ kind: 'eventEdit', props: { id } })}
       />
       <div className="label" style={{ fontWeight: 700 }}>
@@ -877,32 +927,59 @@ export function EventEditSheet({ close, props }: SheetProps) {
   const set = (fn: (x: LifeEvent) => void) => up((pl) => fn(pl.events.find((x) => x.id === e.id)!));
   return (
     <Sheet title={e.name} onClose={close} preview foot={<><DeleteBtn onDelete={() => { up((pl) => void (pl.events = pl.events.filter((x) => x.id !== e.id))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}>
-      <div className="grid2">
-        <TextField label="名前" value={e.name} onChange={(v) => set((x) => void (x.name = v))} />
-        <Seg label="お金の向き" value={e.kind} onChange={(v) => set((x) => void (x.kind = v))} options={[{ value: 'expense', label: '支出' }, { value: 'income', label: '収入' }]} />
-      </div>
-      <Seg label="時期" value={e.pattern} onChange={(v) => set((x) => void (x.pattern = v))} options={[{ value: 'once', label: '1回だけ' }, { value: 'repeat', label: '数年ごと' }, { value: 'monthly', label: '毎月' }]} />
-      <div className="grid2">
-        <MoneyField label="金額" per={e.pattern === 'monthly' ? 'month' : 'once'} hint={e.pattern === 'monthly' ? undefined : '1回あたり'} nullable={false} value={e.amount} onChange={(v) => set((x) => void (x.amount = v ?? 0))} />
-        <YMField label={e.pattern === 'once' ? 'いつ' : '始まり'} nullable={false} value={e.startYM} onChange={(v) => v != null && set((x) => void (x.startYM = v))} from={THIS_YEAR} to={THIS_YEAR + 70} />
-      </div>
-      {e.pattern !== 'once' && (
-        <div className="grid2">
-          {e.pattern === 'repeat' ? <NumField label="間隔" unit="年ごと" nullable={false} min={1} max={30} value={e.everyYears} onChange={(v) => set((x) => void (x.everyYears = Math.round(v ?? 1)))} /> : <div />}
-          <YMField label="終わり" hint="空欄は続ける" value={e.endYM} onChange={(v) => set((x) => void (x.endYM = v))} from={THIS_YEAR} to={THIS_YEAR + 70} />
-        </div>
-      )}
-      <Toggle label="物価の上昇に合わせて増やす" value={e.inflate} onChange={(v) => set((x) => void (x.inflate = v))} />
-      <div className="field">
-        <span>アイコン</span>
-        <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-          {EVENT_ICONS.map((ic) => (
-            <button key={ic} className="iconbtn" style={{ background: ic === e.icon ? 'var(--green-soft)' : 'var(--surface)', color: ic === e.icon ? 'var(--green)' : 'var(--ink-2)' }} aria-pressed={ic === e.icon ? 'true' : 'false'} onClick={() => set((x) => void (x.icon = ic))}>
-              <Icon name={ic} />
-            </button>
-          ))}
-        </div>
-      </div>
+      <Paged pages={[{ value: 'basic', label: '内容' }, { value: 'more', label: '物価・アイコン' }]}>
+        {(page) =>
+          page === 'basic' ? (
+            <>
+            <div className="grid2">
+              <TextField label="名前" value={e.name} onChange={(v) => set((x) => void (x.name = v))} />
+              <Seg label="お金の向き" value={e.kind} onChange={(v) => set((x) => void (x.kind = v))} options={[{ value: 'expense', label: '支出' }, { value: 'income', label: '収入' }]} />
+            </div>
+            <Seg label="時期" value={e.pattern} onChange={(v) => set((x) => void (x.pattern = v))} options={[{ value: 'once', label: '1回だけ' }, { value: 'repeat', label: '数年ごと' }, { value: 'monthly', label: '毎月' }]} />
+            <div className="grid2">
+              <MoneyField label="金額" per={e.pattern === 'monthly' ? 'month' : 'once'} hint={e.pattern === 'monthly' ? undefined : '1回あたり'} nullable={false} value={e.amount} onChange={(v) => set((x) => void (x.amount = v ?? 0))} />
+              <YMField label={e.pattern === 'once' ? 'いつ' : '始まり'} nullable={false} value={e.startYM} onChange={(v) => v != null && set((x) => void (x.startYM = v))} from={THIS_YEAR} to={THIS_YEAR + 70} />
+            </div>
+            {e.pattern !== 'once' && (
+              <div className="grid2">
+                {e.pattern === 'repeat' ? <NumField label="間隔" unit="年ごと" nullable={false} min={1} max={30} value={e.everyYears} onChange={(v) => set((x) => void (x.everyYears = Math.round(v ?? 1)))} /> : <div />}
+                <YMField label="終わり" hint="空欄は続ける" value={e.endYM} onChange={(v) => set((x) => void (x.endYM = v))} from={THIS_YEAR} to={THIS_YEAR + 70} />
+              </div>
+            )}
+            {e.kind === 'expense' && e.pattern !== 'monthly' && (
+              <>
+                <Toggle label="時期から逆算して毎月積み立てる" hint="積立から払うので、その月の家計が赤字になりません" value={!!e.fund} onChange={(v) => set((x) => void (x.fund = v))} />
+                {(() => {
+                  const f = fundInfo(e, p);
+                  return f ? (
+                    <div className="card flat row between" style={{ gap: 8 }}>
+                      <span className="micro" style={{ lineHeight: 1.5 }}>
+                        次は {ymText(f.next)}（あと{f.months}か月・{yen(f.amount)}）
+                      </span>
+                      <b className="num" style={{ whiteSpace: 'nowrap' }}>毎月 {yen(f.monthly)}</b>
+                    </div>
+                  ) : null;
+                })()}
+              </>
+            )}
+            </>
+          ) : (
+            <>
+            <Toggle label="物価の上昇に合わせて増やす" value={e.inflate} onChange={(v) => set((x) => void (x.inflate = v))} />
+            <div className="field">
+              <span>アイコン</span>
+              <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                {EVENT_ICONS.map((ic) => (
+                  <button key={ic} className="iconbtn" style={{ background: ic === e.icon ? 'var(--green-soft)' : 'var(--surface)', color: ic === e.icon ? 'var(--green)' : 'var(--ink-2)' }} aria-pressed={ic === e.icon ? 'true' : 'false'} onClick={() => set((x) => void (x.icon = ic))}>
+                    <Icon name={ic} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            </>
+          )
+        }
+      </Paged>
     </Sheet>
   );
 }

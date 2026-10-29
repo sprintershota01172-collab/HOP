@@ -72,11 +72,18 @@ export const defaultHousing = (): HousingPlan => ({
   newBuildTaxCut: false,
 });
 
+/** 生活費の決まった入力欄（ここにない費目は「そのほかの項目」か「その他の生活費」に入れる） */
+export const LIVING_STD: { std: import('./types').LivingStd; name: string; icon: string; kind: 'fixed' | 'variable' }[] = [
+  { std: 'food', name: '食費', icon: 'food', kind: 'variable' },
+  { std: 'electric', name: '電気代', icon: 'bolt', kind: 'fixed' },
+  { std: 'water', name: '水道代', icon: 'drop', kind: 'fixed' },
+  { std: 'gas', name: 'ガス代', icon: 'flame', kind: 'fixed' },
+  { std: 'phone', name: '携帯代', icon: 'phone', kind: 'fixed' },
+];
+
 export const LIVING_PRESETS: { name: string; icon: string; kind: 'fixed' | 'variable' }[] = [
-  { name: '食費', icon: 'food', kind: 'variable' },
   { name: '日用品', icon: 'basket', kind: 'variable' },
-  { name: '水道光熱費', icon: 'bolt', kind: 'fixed' },
-  { name: '通信費', icon: 'phone', kind: 'fixed' },
+  { name: 'インターネット', icon: 'phone', kind: 'fixed' },
   { name: '車関連費', icon: 'car', kind: 'fixed' },
   { name: 'ガソリン', icon: 'fuel', kind: 'variable' },
   { name: '医療費', icon: 'medical', kind: 'variable' },
@@ -164,11 +171,13 @@ export function sampleData(baseYM: number): AppData {
   p.self = { ...emptyPerson('self'), name: 'たろう', birthYM: toYM(y - 30, 6), netMonthly: 280_000, bonusNetAnnual: 800_000, grossAnnual: 5_500_000, raiseRate: 0.015, retireAge: 65, retireBonus: 15_000_000, pensionStartAge: 65, pensionMonthly: null, cash: 3_000_000 };
   p.spouse = { ...emptyPerson('spouse'), name: 'はなこ', birthYM: toYM(y - 29, 2), netMonthly: 220_000, bonusNetAnnual: 400_000, grossAnnual: 3_900_000, raiseRate: 0.01, retireAge: 65, retireBonus: 5_000_000, pensionStartAge: 65, pensionMonthly: null, cash: 1_500_000 };
   const living: [string, number][] = [
-    ['食費', 60_000], ['日用品', 10_000], ['水道光熱費', 18_000], ['通信費', 12_000], ['車関連費', 15_000], ['ガソリン', 10_000],
+    ['食費', 60_000], ['電気代', 9_000], ['水道代', 4_000], ['ガス代', 5_000], ['携帯代', 12_000], ['日用品', 10_000], ['車関連費', 15_000], ['ガソリン', 10_000],
     ['医療費', 5_000], ['被服費', 10_000], ['娯楽費', 15_000], ['旅行', 15_000], ['その他', 10_000],
   ];
   p.pocket = { self: 20_000, spouse: 20_000, free: null };
   p.living = living.map(([name, monthly]): LivingItem => {
+    const std = LIVING_STD.find((x) => x.name === name);
+    if (std) return { id: uid('liv'), name, icon: std.icon, monthly, kind: std.kind, std: std.std };
     const preset = LIVING_PRESETS.find((x) => x.name === name)!;
     return { id: uid('liv'), name, icon: preset.icon, monthly, kind: preset.kind };
   });
@@ -181,7 +190,7 @@ export function sampleData(baseYM: number): AppData {
     { id: uid('work'), owner: 'spouse', type: 'leave', startYM: birth - 1, months: 13, endYM: null, ratio: 1, maternity: true, childId: child.id },
     { id: uid('work'), owner: 'spouse', type: 'short', startYM: birth + 12, months: 0, endYM: birth + 12 * 6 - 1, ratio: 0.75, maternity: false, childId: child.id },
   ];
-  p.debts = [{ id: uid('debt'), name: '車のローン', monthly: 15_000, endYM: baseYM + 36 }];
+  p.debts = [{ id: uid('debt'), name: '自動車ローン', monthly: 15_000, endYM: baseYM + 36, std: 'car' }];
   p.insurances = [{ id: uid('ins'), name: '医療保険（2人分）', kind: 'medical', monthly: 6_000, payEndYM: null, payout: { type: 'none' } }];
   p.investments = [
     { id: uid('inv'), name: 'NISA つみたて（たろう）', kind: 'nisaTsumitate', owner: 'self', balance: 1_000_000, basis: 850_000, monthly: 30_000, startYM: null, endYM: toYM(y + 34, 12), withdrawStartYM: null, withdrawMonthly: 0 },
@@ -189,10 +198,9 @@ export function sampleData(baseYM: number): AppData {
   ];
   p.goals = [
     { id: uid('goal'), name: '子供の大学資金', target: 5_000_000, ym: birth + 18 * 12 - 2 },
-    { id: uid('goal'), name: '車の買い替え', target: 2_500_000, ym: baseYM + 60 },
   ];
   p.events = [
-    { id: uid('ev'), name: '車の買い替え', icon: 'car', kind: 'expense', pattern: 'repeat', amount: 2_500_000, startYM: baseYM + 60, endYM: toYM(y + 40, 12), everyYears: 8, inflate: true },
+    { id: uid('ev'), name: '車の買い替え', icon: 'car', kind: 'expense', pattern: 'repeat', amount: 2_500_000, startYM: baseYM + 60, endYM: toYM(y + 40, 12), everyYears: 8, inflate: true, fund: true },
     { id: uid('ev'), name: '出産費用（一時金との差額）', icon: 'baby', kind: 'expense', pattern: 'once', amount: 100_000, startYM: birth, endYM: null, everyYears: 1, inflate: false },
   ];
   p.housing = {

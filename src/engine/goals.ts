@@ -24,7 +24,7 @@ export function goalStatus(goals: Goal[], sim: SimResult): GoalStatus[] {
     const monthsLeft = Math.max(1, g.ym - sim.start);
     const i = Math.min(sim.rows.length - 1, Math.max(0, g.ym - sim.start));
     const row = sim.rows[i];
-    const projected = row ? row.cash + row.invest : 0;
+    const projected = row ? row.cash + row.fund + row.invest : 0;
     const achieved = projected >= g.target;
     return {
       id: g.id,
