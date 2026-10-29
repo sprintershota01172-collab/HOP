@@ -110,6 +110,18 @@
 }
 @media (max-height: 700px) {
   :root { --gap: 8px; --pad: 10px; --fs-hero: clamp(30px, 9.5vw, 40px); --nav: 54px; --head: 44px; }
+  /* 小さい画面: 下のボタンはアイコンと文字を横に並べて低くし、候補の住宅を1件以上見せる */
+  .app .quick .btn { flex-direction: row; gap: 4px; min-height: 42px; }
+  .app .quick .btn svg { width: 17px; height: 17px; }
+  /* 候補の住宅は1行（順位・名前・総額・判定）にして件数を確保する */
+  .app .cands { gap: 4px; }
+  .app .card.cands-card { padding: 6px 10px; gap: 4px !important; }
+  .app .cands-card .btn.small { min-height: 24px; }
+  .app .cands .item { min-height: 32px; padding: 2px 8px; gap: 8px; }
+  .app .cands .item .rank { width: 24px; height: 24px; font-size: 13px; }
+  .app .cands .item .grow { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .app .cands .item .t { font-size: var(--fs-s); flex: 0 1 auto; min-width: 0; }
+  .app .cands .item .micro { flex: 0 1 auto; min-width: 0; }
 }
 @media (max-height: 600px) {
   :root { --gap: 6px; --pad: 8px; --fs-l: 15px; --fs-xl: 19px; --fs-hero: 30px; }
@@ -134,7 +146,7 @@
   .app .card.kpis { gap: 2px 8px; padding: 6px 10px; }
   .app .card.hero { gap: 4px; padding: 8px 10px; }
   .app .cands-card .btn.small { min-height: 26px; }
-  .app .quick .btn { min-height: 46px; }
+  .app .quick .btn { min-height: 38px; }
   .flowline { padding: 4px 8px; }
   .tier-note { display: none; }
   .res .kpi { padding: 2px 0; }
@@ -143,7 +155,7 @@
   .card { padding: 8px 10px; }
 }
 @media (max-height: 700px) {
-  .hide-short { display: none; }
+  .hide-short { display: none !important; }
   .app .legend { gap: 0; }
   .app .legend button.li { min-height: 22px; padding: 1px 6px; }
   .app .wf .ln { padding: 3px 0; }

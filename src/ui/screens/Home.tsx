@@ -36,7 +36,8 @@ export function SampleBanner() {
 export function Home() {
   const s = useStore();
   const vm = s.vm;
-  const fit = useFit<HTMLDivElement>(52, 6, 0);
+  const short = typeof window !== 'undefined' && window.innerHeight <= 700;
+  const fit = useFit<HTMLDivElement>(short ? 32 : 52, short ? 4 : 6, 0);
   if (!vm) return <Loading />;
   if (!vm.ready) {
     return (
@@ -113,7 +114,7 @@ export function Home() {
               desired={null}
               cap={r.overBank ? f.total : null}
             />
-            <div className="row hide-tiny" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <div className="row hide-short" style={{ gap: 10, flexWrap: 'wrap' }}>
               {(r.overBank ? rulerLegend(t, f.total) : RULER_ALL).map((k) => (
                 <Legend key={k} color={LEGEND[k].color} text={LEGEND[k].text} />
               ))}
@@ -165,7 +166,7 @@ export function Home() {
                 <div className="grow">
                   <div className="t ellipsis">{h.name}</div>
                   <div className="micro ellipsis">
-                    総額 {yen(h.total)} ・ 月 {yen(h.metrics.monthlyHousing)}
+                    総額 {yen(h.total)}<span className="hide-short"> ・ 月 {yen(h.metrics.monthlyHousing)}</span>
                   </div>
                 </div>
                 <TierChip tier={h.tier} />
