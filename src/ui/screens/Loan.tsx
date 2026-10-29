@@ -161,7 +161,14 @@ export function Loan() {
       </div>
 
       <Switcher k={mode} dir={MODES.indexOf(mode) - MODES.indexOf(prevMode.current) >= 0 ? 1 : -1}>
-        {!r ? (
+        {target <= 0 ? (
+          <div className="card fill empty">
+            <MascotSays size={48} pose="think" text="試算する借入額が0円になっているよ（ローンを組まない計算）" />
+            <button className="btn primary" onClick={() => { setDraft(null); s.update((d) => void (d.plan.housing.desiredLoan = null)); }}>
+              推奨の借入額 {yen(vm.rec.final.loan)} に戻す
+            </button>
+          </div>
+        ) : !r ? (
           <div className="card fill" style={{ opacity: 0.5 }} />
         ) : mode === 'result' ? (
           <Result r={r} gross={bank.gross} />

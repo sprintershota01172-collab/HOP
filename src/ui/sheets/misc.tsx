@@ -127,7 +127,7 @@ function Lines({ vm, go }: { vm: ViewModel; go: Go }) {
     <>
       <div className="micro" style={{ lineHeight: 1.5 }}>
         {bankMode
-          ? `③ の予算（借入 ${yen(vm.rec.final.loan)}）で買った後、購入から${span}の月平均です。`
+          ? `購入予算（借入 ${yen(vm.rec.final.loan)}）で買った後、購入から${span}の月平均です。`
           : b.endKind === 'atPurchase'
             ? '購入した時点で、手元に残すべき予備資金が足りません。'
             : `購入から${ymText(b.to)}まで（${span}）の月平均。家計の中で、毎月ローンの返済に回せる金額です。`}
@@ -163,7 +163,7 @@ function Lines({ vm, go }: { vm: ViewModel; go: Go }) {
   );
 }
 
-/** ① → ② → ③ の流れと、自己資金・審査の目安（実際に借りる額で説明する） */
+/** 借入額 ＋ 自己資金 ＝ 購入予算 の組み立てと、毎月の返済・審査の目安（実際に借りる額で説明する） */
 function Flow({ vm, go }: { vm: ViewModel; go: Go }) {
   const b = vm.breakdown!;
   const r = vm.rec;
@@ -178,17 +178,17 @@ function Flow({ vm, go }: { vm: ViewModel; go: Go }) {
       <FlowCards vm={vm} />
       <div className="card stack" style={{ gap: 6 }}>
         <div className="micro" style={{ lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--ink)' }}>① 毎月の返済</b> = 借入 {yen(f.loan)} を金利 {pct(b.rate, 2)}・{b.years}年（{b.years * 12}回）で返す額{f.paymentBonus ? `（ボーナス月 +${yen(f.paymentBonus)}）` : ''}。
+          <b style={{ color: 'var(--ink)' }}>毎月の返済</b> = 借入 {yen(f.loan)} を金利 {pct(b.rate, 2)}・{b.years}年（{b.years * 12}回）で返す額{f.paymentBonus ? `（ボーナス月 +${yen(f.paymentBonus)}）` : ''}。
           {m && <>総返済 <span className="interest">{yen(m.totalPayment)}</span>、うち利息 <span className="interest">{yen(m.totalInterest)}</span>。</>}
         </div>
         <div className="micro" style={{ lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--ink)' }}>② 借入額</b>
+          <b style={{ color: 'var(--ink)' }}>借入額</b>
           {r.overBank
             ? ` は、金融機関の審査の目安 ${yen(bank.amount)} で決まっています。家計の余力からは、毎月 ${yen(r.payment)}・借入 ${yen(r.loan)} まで返せる計算です（参考）。`
             : ` = 家計の中で毎月返済に回せる金額（${yen(r.payment)}）を、金利・返済期間で割り戻した額。審査の目安 ${yen(bank.amount)} の範囲内です。`}
         </div>
         <div className="micro" style={{ lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--ink)' }}>③ 住宅購入予算</b> = ② {yen(f.loan)} ＋ 自己資金 {yen(f.down)} = 物件 {yen(f.price)} ＋ 諸費用 {yen(f.total - f.price)}
+          <b style={{ color: 'var(--ink)' }}>住宅購入予算</b> = 借入 {yen(f.loan)} ＋ 自己資金 {yen(f.down)} = 物件 {yen(f.price)} ＋ 諸費用 {yen(f.total - f.price)}
         </div>
         <button className="item" style={{ minHeight: 0 }} onClick={() => go('housing', 'plan')}>
           <div className="grow micro" style={{ lineHeight: 1.6 }}>
@@ -211,24 +211,34 @@ function Flow({ vm, go }: { vm: ViewModel; go: Go }) {
   );
 }
 
-/** ① 毎月の返済 → ② 借入額 → ③ 購入予算（実際に目指す予算） */
+/** 購入予算の組み立て: 借入額 ＋ 自己資金 ＝ 購入予算。その下に、借入額を返す毎月の返済 */
 export function FlowCards({ vm }: { vm: ViewModel }) {
   const f = vm.rec.final;
+  const b = vm.breakdown;
   return (
-    <div className="flow">
-      <div className="card flat">
-        <div className="label">① 毎月の返済</div>
-        <Money v={f.payment} />
+    <div className="flow-wrap">
+      <div className="flow">
+        <div className="card flat">
+          <div className="label">借入額</div>
+          <Money v={f.loan} />
+          <div className="micro ellipsis hide-tiny">{vm.rec.overBank ? '審査の上限' : '家計の上限'}</div>
+        </div>
+        <span className="arrow">＋</span>
+        <div className="card flat">
+          <div className="label">自己資金</div>
+          <Money v={f.down} />
+          <div className="micro ellipsis hide-tiny">{f.down > 0 ? '手元の現金から' : '予備資金を残すと0'}</div>
+        </div>
+        <span className="arrow">＝</span>
+        <div className="card main-n">
+          <div className="label">購入予算</div>
+          <Money v={f.total} />
+          <div className="micro ellipsis hide-tiny">物件＋諸費用</div>
+        </div>
       </div>
-      <span className="arrow">→</span>
-      <div className="card flat">
-        <div className="label">② 借入額</div>
-        <Money v={f.loan} />
-      </div>
-      <span className="arrow">→</span>
-      <div className="card main-n">
-        <div className="label">③ 購入予算</div>
-        <Money v={f.total} />
+      <div className="flow-pay micro ellipsis hide-tiny">
+        借入 {yen(f.loan)} を{b ? `${pct(b.rate, 2)}・${b.years}年で` : ''}返すと <b className="num">毎月 {yen(f.payment)}</b>
+        {f.paymentBonus ? `（ボーナス月 +${yen(f.paymentBonus)}）` : ''}
       </div>
     </div>
   );
@@ -318,7 +328,7 @@ function BankLevers({ vm, go }: { vm: ViewModel; go: Go }) {
 function Checks({ vm, months }: { vm: ViewModel; months: number }) {
   return (
     <>
-      <div className="micro">③ の予算（借入 {yen(vm.rec.final.loan)}）で購入した場合に、生活費{months}か月分の予備資金と老後の資金を保てるか。</div>
+      <div className="micro">購入予算（借入 {yen(vm.rec.final.loan)}）で購入した場合に、生活費{months}か月分の予備資金と老後の資金を保てるか。</div>
       <div className="stack fill" style={{ gap: 0 }}>
         {vm.checks.map((c) => (
           <div key={c.key} className="check-row">
