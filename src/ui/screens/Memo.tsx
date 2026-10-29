@@ -3,6 +3,7 @@ import type { Memo as MemoT, MemoCategory } from '../../engine/types';
 import { Pager, useFit, usePages, useSwipe } from '../components/fields';
 import { Icon } from '../icons';
 import { useStore } from '../store';
+import { MascotSays } from '../Mascot';
 import { SampleBanner } from './Home';
 
 export const MEMO_CAT: Record<MemoCategory, { label: string; icon: string }> = {
@@ -90,8 +91,7 @@ export function Memo() {
       </div>
       {memos.length === 0 ? (
         <div className="empty fill">
-          <Icon name="memo" size={32} />
-          <div>打ち合わせの内容、気になった点、確認したいことを残しておけます</div>
+          <MascotSays size={52} pose="wave" text="打ち合わせの内容や気になった点を、ここに残しておくっぽ" />
         </div>
       ) : (
         <div className="list fill" ref={fit.ref} {...swipe}>

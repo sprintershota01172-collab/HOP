@@ -18,6 +18,7 @@ import { pct, yen, ymText } from '../format';
 import { Icon } from '../icons';
 import { MEMO_CAT } from '../screens/Memo';
 import { useStore } from '../store';
+import { MascotSays } from '../Mascot';
 import { ChildrenSection, Done, HousingSection, IncomeSection, InvestSection, LivingSection, SavingsSection, WorkSection, type SheetProps } from './plan';
 
 
@@ -345,6 +346,9 @@ function Assumed({ vm, go }: { vm: ViewModel; go: Go }) {
           <small className="micro"> {vm.confidence.score}点</small>
         </b>
       </div>
+      <div className="micro" style={{ lineHeight: 1.5 }}>
+        100点から、入力がなく仮の値で計算した項目ごとに 影響大 −12・影響中 −5・影響小 −2 点。75点以上で「高」、50点以上で「中」。下の項目を入れると上がります。
+      </div>
       {vm.assumed.length === 0 ? (
         <div className="empty">仮置きした項目はありません</div>
       ) : (
@@ -435,6 +439,31 @@ export function SaleSheet({ close }: SheetProps) {
           <div className="micro" style={{ lineHeight: 1.6 }}>この予定は「将来の家計」の推移にだけ反映します。住宅購入予算は、売却を当てにせずに計算します。</div>
         </>
       )}
+    </Sheet>
+  );
+}
+
+/** 一般的な入力項目のうち、まだ入っていないもの（タップでその入力へ） */
+export function MissingSheet({ close }: SheetProps) {
+  const s = useStore();
+  const list = s.vm?.missing ?? [];
+  const fit = useFit<HTMLDivElement>(52, 6, 2);
+  const pg = usePages(list, fit.n);
+  return (
+    <Sheet title={`未入力の項目 ${list.length}件`} onClose={close} foot={<button className="btn primary" onClick={close}>閉じる</button>}>
+      <MascotSays size={48} pose="think" text={list.length ? '入れると予算が正確になるっぽ。ない項目は 0 を入れてね' : 'ぜんぶ入力できたっぽ！'} mood={list.length ? 'normal' : 'happy'} />
+      <div className="list fill" ref={fit.ref}>
+        {pg.slice.map((m) => (
+          <button key={m.key} className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: m.sheet, props: m.props ?? {} })}>
+            <span className="ic" style={{ background: 'var(--orange-soft)', color: 'var(--orange)' }}>
+              <Icon name="info" />
+            </span>
+            <div className="grow t ellipsis">{m.label}</div>
+            <Icon name="right" size={16} />
+          </button>
+        ))}
+      </div>
+      <Pager {...pg} />
     </Sheet>
   );
 }
@@ -875,6 +904,18 @@ export function WizardSheet({ close }: SheetProps) {
   };
   const cur = WIZARD[step];
   const last = step === WIZARD.length - 1;
+  // 一般的な入力項目の入れ忘れ: 1回目の「次へ」で知らせ、もう一度押すとそのまま進める
+  const STEP_SHEET: Record<string, string> = { income: 'income', living: 'living', housing: 'housing', children: 'children' };
+  const miss = (s.vm?.missing ?? []).filter((m) => m.sheet === STEP_SHEET[cur.key]);
+  const [warned, setWarned] = useState(-1);
+  const next = () => {
+    if (miss.length && warned !== step) {
+      setWarned(step);
+      s.notify(`未入力: ${miss.map((m) => m.label).join('、')}。ない場合は 0 を入れてください（もう一度押すと進みます）`);
+      return;
+    }
+    go(step + 1);
+  };
   return (
     <Sheet
       title={`かんたん入力 ${step + 1}/${WIZARD.length}・${cur.title}`}
@@ -888,8 +929,8 @@ export function WizardSheet({ close }: SheetProps) {
             </button>
           )}
           {!last ? (
-            <button className="btn primary" onClick={() => go(step + 1)}>
-              次へ（{WIZARD[step + 1].title}）
+            <button className="btn primary" onClick={next}>
+              {miss.length && warned === step ? 'このまま次へ' : `次へ（${WIZARD[step + 1].title}）`}
             </button>
           ) : (
             <button className="btn primary" onClick={() => { s.closeAll(); s.setTab('home'); }}>

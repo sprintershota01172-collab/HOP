@@ -119,6 +119,7 @@ export function NumField(props: {
   min?: number;
   max?: number;
   text?: boolean;
+  required?: boolean;
 }) {
   const sc = props.scale ?? 1;
   const fmt = (v: number) => String(Math.round(v * sc * 1000) / 1000);
@@ -138,6 +139,7 @@ export function NumField(props: {
     <label className="field" htmlFor={id}>
       <span>
         {props.label}
+        {props.required && <b className="req"> 必須</b>}
         {props.hint && <span className="hint"> ・{props.hint}</span>}
       </span>
       <div className={`inp${props.value == null ? ' unset' : ''}`}>

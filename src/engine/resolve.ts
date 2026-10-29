@@ -44,6 +44,14 @@ export interface RInsurance {
   annuity: { startYM: YM; months: number; monthly: Yen } | null;
 }
 
+/** 一般的に誰でも入力する項目のうち、まだ入っていないもの（0円なら0と入力する） */
+export interface Missing {
+  key: string;
+  label: string;
+  sheet: string;
+  props?: Record<string, string>;
+}
+
 export interface Resolved {
   plan: Plan;
   ready: boolean;
@@ -62,6 +70,7 @@ export interface Resolved {
   /** お小遣い・自由費の合計（livingTotal に含む） */
   pocketTotal: Yen;
   insurances: RInsurance[];
+  missing: Missing[];
 }
 
 const man = yenText;
@@ -190,6 +199,24 @@ export function resolvePlan(plan: Plan): Resolved {
   if (h.insuranceAnnual == null)
     assumed.push({ key: 'ins', label: '火災・地震保険', value: `年${man(h.kind === 'mansion' ? ASSUME.insuranceMansion : ASSUME.insuranceDetached)}（目安）`, impact: 'low', sheet: 'housing' });
 
+  // 一般的な入力項目の入れ忘れ（必須の扱い。なければ 0 と入力する）
+  const missing: Missing[] = [];
+  for (const p of members) {
+    const who = p.name || (p.id === 'self' ? '本人' : '配偶者');
+    if (p.bonusNetAnnual == null) missing.push({ key: `${p.id}-bonus`, label: `${who}の賞与`, sheet: 'income' });
+    if (p.grossAnnual == null) missing.push({ key: `${p.id}-gross`, label: `${who}の額面年収`, sheet: 'income' });
+    if (p.retireAge == null) missing.push({ key: `${p.id}-retire`, label: `${who}の退職年齢`, sheet: 'income' });
+    if (p.pensionMonthly == null) missing.push({ key: `${p.id}-pension`, label: `${who}の年金（ねんきん定期便）`, sheet: 'income' });
+  }
+  const STD: [string, string][] = [['food', '食費'], ['electric', '電気代'], ['water', '水道代'], ['gas', 'ガス代'], ['phone', '携帯代']];
+  for (const [std, name] of STD)
+    if (!plan.living.some((x) => x.std === std || (!x.std && !x.lump && x.name === name))) missing.push({ key: `living-${std}`, label: name, sheet: 'living' });
+  if (pk.self == null) missing.push({ key: 'pocket-self', label: `${plan.self.name || '本人'}のお小遣い`, sheet: 'living', props: { page: 'pocket' } });
+  if (plan.spouse && pk.spouse == null) missing.push({ key: 'pocket-spouse', label: `${plan.spouse.name || '配偶者'}のお小遣い`, sheet: 'living', props: { page: 'pocket' } });
+  if (h.rentMonthly == null) missing.push({ key: 'rent', label: 'いまの家賃', sheet: 'housing', props: { page: 'now' } });
+  if (h.purchaseYM == null) missing.push({ key: 'purchase', label: '家を買う時期', sheet: 'housing', props: { page: 'plan' } });
+  if (!a.childrenConfirmed && plan.children.length === 0) missing.push({ key: 'children', label: '子供の予定', sheet: 'children' });
+
   const start = plan.baseYM;
   const ends = people.map((p) => p.birthYM + a.endAge * 12);
   let end = Math.max(start + 12, ...ends);
@@ -226,5 +253,6 @@ export function resolvePlan(plan: Plan): Resolved {
     livingTotal,
     pocketTotal,
     insurances,
+    missing,
   };
 }

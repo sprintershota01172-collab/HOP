@@ -6,6 +6,7 @@ import { Diff, Kpi, Money, tierNote, TierChip } from '../components/bits';
 import { Pager, useFit, usePages } from '../components/fields';
 import { pct, yen, ymText } from '../format';
 import { useStore } from '../store';
+import { MascotSays } from '../Mascot';
 import { Loading, SampleBanner } from './Home';
 
 const RATE_LABEL = { variable: '変動', fixed: '全期間固定', fixedPeriod: '固定期間選択' } as const;
@@ -63,7 +64,7 @@ export function Loan() {
     return (
       <div className="screen">
         <div className="empty fill">
-          <div>ライフプランを入力すると、無理なく返せる借入額を診断します</div>
+          <MascotSays size={52} text="ライフプランを入れると、無理なく返せる借入額を診断するっぽ" />
           <button className="btn primary" onClick={() => s.open({ kind: 'wizard' })}>
             かんたん入力
           </button>

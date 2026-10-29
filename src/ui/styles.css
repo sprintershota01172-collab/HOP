@@ -230,7 +230,7 @@ button { cursor: pointer; }
 .screen::-webkit-scrollbar { display: none; }
 
 /* ---------- 画面の切り替え（Switcher） ---------- */
-:root { --ease: cubic-bezier(0.4, 0, 0.2, 1); --t-switch: 300ms; --shift: 22px; }
+:root { --ease: cubic-bezier(0.4, 0, 0.2, 1); --t-switch: 220ms; --shift: 0px; }
 .switcher { position: relative; min-height: 0; flex: 1; }
 .main > .switcher { position: absolute; inset: 0; }
 .pane {
@@ -628,3 +628,17 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .legend .li .badge { margin-right: 6px; }
 .legend button.li { grid-template-columns: minmax(0, 1fr) auto; }
 .wf .ln .v .once.span { color: var(--green-2); background: var(--green-soft); }
+
+/* 未入力の知らせ */
+.banner.warn { background: var(--orange-soft); border: 0; width: 100%; text-align: left; color: var(--ink); gap: 8px; display: flex; align-items: center; }
+.banner.warn .btn { pointer-events: none; }
+.yearbar .y .ages { display: block; max-width: 62vw; margin: 0 auto; }
+.cands-empty { padding: 4px 8px; min-height: 0; overflow: hidden; }
+.cands-empty .bubble { font-size: var(--fs-xs); padding: 5px 9px; }
+@media (max-height: 700px) {
+  .app .cands-empty { border: 0; padding: 0; justify-content: flex-start; }
+  .app .cands-empty .mascot { display: none; }
+  .app .cands-empty .bubble { border: 0; background: none; padding: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); }
+  .app .cands-empty .bubble::before { display: none; }
+  .app .cands-empty .mascot-says { min-width: 0; max-width: 100%; }
+}

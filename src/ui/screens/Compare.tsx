@@ -5,6 +5,7 @@ import { Pager, useFit, usePages, useSwipe } from '../components/fields';
 import { yen } from '../format';
 import { Icon } from '../icons';
 import { useStore } from '../store';
+import { Mascot, MascotSays } from '../Mascot';
 import { Switcher } from '../components/Switcher';
 import { startNewHouse } from '../sheets/house';
 import { Loading, SampleBanner } from './Home';
@@ -37,10 +38,12 @@ export function Compare() {
       {!vm ? (
         <Loading />
       ) : !vm.ready ? (
-        <div className="empty fill">ライフプランを入力すると、住宅ごとに家計との相性を判定します</div>
+        <div className="empty fill">
+          <MascotSays size={48} text="ライフプランを入れると、家ごとに相性を判定するっぽ" />
+        </div>
       ) : vm.houses.length === 0 ? (
         <div className="empty fill">
-          <Icon name="house" size={36} />
+          <Mascot size={64} pose="wave" />
           <div>
             候補の住宅やハウスメーカーを登録すると、
             <br />

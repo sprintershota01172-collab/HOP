@@ -74,11 +74,12 @@ export function Home() {
   return (
     <div className="screen">
       <SampleBanner />
+      <MissingBanner />
       <div className="card hero">
         <Mascot className="hero-mascot" size={64} mood={!t.standard.ok ? 'worry' : vm.loanBase && (vm.loanBase.tier === 'caution' || vm.loanBase.tier === 'danger') ? 'worry' : 'happy'} />
         <div className="row">
           <span className="label">あなたの住宅購入予算</span>
-          <button className="chip" style={{ marginLeft: 'auto', position: 'relative' }} onClick={() => s.open({ kind: 'basis' })} aria-label="計算の内訳を見る">
+          <button className="chip" style={{ marginLeft: 'auto', position: 'relative' }} onClick={() => s.open({ kind: 'basis', props: vm.confidence.level === '高' ? {} : { page: 'assumed' } })} aria-label="計算の内訳を見る">
             <Icon name="info" />
             計算の内訳・信頼度 {vm.confidence.level}
           </button>
@@ -151,7 +152,9 @@ export function Home() {
           )}
         </div>
         {ranked.length === 0 ? (
-          <div className="empty fill">住宅を登録すると、家計との相性を判定します</div>
+          <div className="empty fill cands-empty">
+            <MascotSays size={36} pose="wave" text="気になる家を登録すると、家計との相性を見るっぽ！" />
+          </div>
         ) : (
           <div className="cands fill" ref={fit.ref}>
             {ranked.slice(0, Math.min(3, fit.n)).map((h) => (
@@ -235,11 +238,27 @@ function Legend({ color, text }: { color: string; text: string }) {
   );
 }
 
+/** 一般的な入力項目の入れ忘れを知らせる */
+export function MissingBanner() {
+  const s = useStore();
+  const n = s.vm?.missing.length ?? 0;
+  if (!n || s.data.sample) return null;
+  return (
+    <button className="banner warn" onClick={() => s.open({ kind: 'missing' })}>
+      <Mascot size={34} pose="think" />
+      <span className="grow">
+        未入力の項目が <b>{n}件</b> あるっぽ
+      </span>
+      <span className="btn small">入力する</span>
+    </button>
+  );
+}
+
 export function Loading() {
   return (
     <div className="screen" aria-busy="true">
-      <div className="card hero" style={{ height: 160, opacity: 0.6 }}>
-        <div className="label">計算しています…</div>
+      <div className="card hero" style={{ height: 160, opacity: 0.8, justifyContent: 'center' }}>
+        <MascotSays size={52} pose="think" text="計算しているっぽ…" />
       </div>
       <div className="card" style={{ height: 120, opacity: 0.4 }} />
       <div className="card fill" style={{ opacity: 0.3 }} />

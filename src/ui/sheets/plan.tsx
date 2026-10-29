@@ -104,8 +104,8 @@ export function IncomeSection() {
                   </div>
                   <MoneyField label="手取り月収" hint="賞与を除く" per="month" required value={person.netMonthly} onChange={(v) => set((x) => void (x.netMonthly = v))} />
                   <div className="grid2">
-                    <MoneyField label="賞与（手取り・年合計）" per="year" value={person.bonusNetAnnual} onChange={(v) => set((x) => void (x.bonusNetAnnual = v))} />
-                    <MoneyField label="額面年収（賞与込み）" hint="審査の目安・年金の推計" per="year" value={person.grossAnnual} onChange={(v) => set((x) => void (x.grossAnnual = v))} />
+                    <MoneyField label="賞与（手取り・年合計）" required per="year" value={person.bonusNetAnnual} onChange={(v) => set((x) => void (x.bonusNetAnnual = v))} />
+                    <MoneyField label="額面年収（賞与込み）" required hint="審査の目安・年金の推計" per="year" value={person.grossAnnual} onChange={(v) => set((x) => void (x.grossAnnual = v))} />
                   </div>
                   <div className="grid2">
                     <NumField label="昇給率（年）" unit="%" scale={100} value={person.raiseRate} onChange={(v) => set((x) => void (x.raiseRate = v))} hint="未入力は物価並み" />
@@ -115,12 +115,12 @@ export function IncomeSection() {
               ) : (
                 <>
                   <div className="grid2">
-                    <NumField label="退職年齢" unit="歳" value={person.retireAge} min={40} max={80} onChange={(v) => set((x) => void (x.retireAge = v))} hint="未入力は65歳" />
+                    <NumField label="退職年齢" required unit="歳" value={person.retireAge} min={40} max={80} onChange={(v) => set((x) => void (x.retireAge = v))} hint="未入力は65歳" />
                     <MoneyField label="退職金（手取り）" value={person.retireBonus} onChange={(v) => set((x) => void (x.retireBonus = v))} />
                   </div>
                   <div className="grid2">
                     <NumField label="年金の受給開始" unit="歳" value={person.pensionStartAge} min={60} max={75} onChange={(v) => set((x) => void (x.pensionStartAge = v))} />
-                    <MoneyField label="年金（手取り）" per="month" value={person.pensionMonthly} onChange={(v) => set((x) => void (x.pensionMonthly = v))} />
+                    <MoneyField label="年金（手取り）" required hint="ねんきん定期便" per="month" value={person.pensionMonthly} onChange={(v) => set((x) => void (x.pensionMonthly = v))} />
                   </div>
                   <div className="card flat micro" style={{ lineHeight: 1.6 }}>
                     年金が未入力のときは、額面年収と加入年数から推計します（老齢基礎年金 月70,608円＋報酬比例部分）。ねんきん定期便の見込額を入れると信頼度が上がります。
@@ -479,8 +479,8 @@ export function PocketSection() {
   return (
     <>
       <div className="grid2">
-        <MoneyField mark={MARK.pocket} label={`${p.self.name || '本人'}のお小遣い`} per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
-        {p.spouse && <MoneyField mark={MARK.pocket} label={`${p.spouse.name || '配偶者'}のお小遣い`} per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
+        <MoneyField mark={MARK.pocket} label={`${p.self.name || '本人'}のお小遣い`} required per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
+        {p.spouse && <MoneyField mark={MARK.pocket} label={`${p.spouse.name || '配偶者'}のお小遣い`} required per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
       </div>
       <MoneyField mark={MARK.free} label="自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
       <div className="card flat row between">
@@ -527,7 +527,7 @@ function LivingBase() {
     <>
       <div className="grid2">
         {LIVING_STD.map((d) => (
-          <MoneyField key={d.std} mark={LIVING_MARK[d.std]} label={d.name} per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
+          <MoneyField key={d.std} mark={LIVING_MARK[d.std]} label={d.name} required per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
         ))}
         <MoneyField mark={LIVING_MARK.other} label="その他の生活費" hint="まとめて" per="month" value={lump ? lump.monthly : null} placeholder="未入力" onChange={setLump} />
       </div>
@@ -1154,14 +1154,14 @@ export function HousingSection({ initial }: { initial?: 'now' | 'plan' | 'cost' 
       {(page) =>
         page === 'now' ? (
           <>
-            <MoneyField label="家賃" hint="駐車場・共益費込み" per="month" value={h.rentMonthly} placeholder="持ち家・実家なら 0" onChange={(v) => set((x) => void (x.rentMonthly = v))} />
+            <MoneyField label="家賃" required hint="駐車場・共益費込み" per="month" value={h.rentMonthly} placeholder="持ち家・実家なら 0" onChange={(v) => set((x) => void (x.rentMonthly = v))} />
             <NumField label="家賃と住宅費が重なる期間" unit="か月" nullable={false} min={0} max={12} value={h.overlapMonths} onChange={(v) => set((x) => void (x.overlapMonths = Math.round(v ?? 0)))} hint="引越しまでの二重払い" />
             <div className="micro">購入後は家賃を計上しません（重なる期間だけ両方を払います）。</div>
           </>
         ) : page === 'plan' ? (
           <>
             <div className="grid2">
-              <YMField label="購入の予定" value={h.purchaseYM} onChange={(v) => set((x) => void (x.purchaseYM = v))} from={THIS_YEAR} to={THIS_YEAR + 30} />
+              <YMField label="購入の予定" required value={h.purchaseYM} onChange={(v) => set((x) => void (x.purchaseYM = v))} from={THIS_YEAR} to={THIS_YEAR + 30} />
               <Seg label="種類" value={h.kind} onChange={(v) => set((x) => void ((x.kind = v), (x.landShare = v === 'mansion' ? 0.2 : 0.35)))} options={[{ value: 'detached', label: '戸建て' }, { value: 'mansion', label: 'マンション' }]} />
             </div>
             <Seg label="自己資金（頭金＋現金で払う諸費用）" value={h.downMode} onChange={(v) => set((x) => void (x.downMode = v))} options={[{ value: 'auto', label: '予備資金を残して自動' }, { value: 'manual', label: '金額を決める' }]} />

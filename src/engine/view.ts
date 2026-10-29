@@ -9,7 +9,7 @@ import type { HouseEval } from './houses';
 import { computeAll, loanTrial, type Computed, type LoanWhatIf } from './index';
 import { tryLoan, type BankLimit, type Budget, type Context, type Fail, type Metrics, type ScenarioKey, type Tier, type TierKey, type TierResult } from './recommend';
 import type { LoanSchedule } from './loan';
-import type { Assumed } from './resolve';
+import type { Assumed, Missing } from './resolve';
 import type { SimWarning } from './simulate';
 import type { AppData, LoanTerms, Yen, YM } from './types';
 
@@ -79,6 +79,8 @@ export interface ViewModel {
   ready: boolean;
   blocking: string[];
   assumed: Assumed[];
+  /** 一般的な入力項目のうち、まだ入っていないもの */
+  missing: Missing[];
   confidence: { score: number; level: '高' | '中' | '低'; reasons: string[] };
   start: YM;
   end: YM;
@@ -162,6 +164,7 @@ export function computeView(data: AppData): ViewModel {
     ready: r.ready,
     blocking: r.blocking,
     assumed: r.assumed,
+    missing: r.missing,
     confidence: r.confidence,
     start: r.start,
     end: r.end,

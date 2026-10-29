@@ -230,8 +230,14 @@ describe('入力・保存・再計算', () => {
       await inp.press('Enter');
     };
     const next = async () => {
+      const title = await sheet().locator('h2').textContent();
       await sheet().locator('.sheet-foot .btn.primary').click();
       await page.waitForTimeout(380);
+      // 未入力の項目があると1回目は知らせるだけ（もう一度押すと進む）
+      if ((await sheet().locator('h2').textContent()) === title) {
+        await sheet().locator('.sheet-foot .btn.primary').click();
+        await page.waitForTimeout(380);
+      }
     };
     // 1 収入
     await field('生まれた年月').locator('select').first().selectOption('1995');
@@ -295,6 +301,7 @@ describe('入力・保存・再計算', () => {
     await settle(page);
     const before = await heroText(page);
     await page.click('.hero button[aria-label="計算の内訳を見る"]');
+    await page.locator('.sheet .seg button:has-text("内訳")').first().click();
     await page.waitForSelector('.sheet .wf .ln');
     await page.locator('.sheet .wf .ln:has-text("手取り収入")').first().click();
     await page.waitForTimeout(380);

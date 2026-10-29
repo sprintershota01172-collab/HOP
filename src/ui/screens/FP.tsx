@@ -64,6 +64,12 @@ function Result() {
   const year = Math.min(endY, Math.max(startY, s.viewYear ?? ymYear(vm.purchaseYM) + 1));
   const self = vm.people[0];
   const age = self ? ageAt(self.birthYM, toYM(year, 12)) : null;
+  // その年の12月時点の年齢（本人・配偶者・生まれている子供）
+  const ages = [
+    ...vm.people.map((x) => `${x.name} ${ageAt(x.birthYM, toYM(year, 12))}歳`),
+    ...s.data.plan.children.filter((c) => c.birthYM <= toYM(year, 12)).map((c) => `${c.name} ${ageAt(c.birthYM, toYM(year, 12))}歳`),
+  ].join('・');
+  void age;
   const setYear = (y: number) => s.setViewYear(Math.min(endY, Math.max(startY, y)));
   const quick: [string, number][] = [
     ['5年後', startY + 5],
@@ -103,7 +109,7 @@ function Result() {
         </button>
         <div className="y">
           <b>{year}年</b>
-          {age != null && <span className="micro"> {self.name} {age}歳</span>}
+          <span className="micro ages ellipsis">{ages}</span>
         </div>
         <button className="iconbtn" onClick={() => setYear(year + 1)} aria-label="次の年">
           <Icon name="right" />
@@ -409,10 +415,10 @@ function Inputs() {
       </div>
       <div className="tiles">
         {tiles.map((x) => (
-          <button key={x.k} className="tile" data-need={need(!!x.need)} onClick={() => s.open({ kind: x.k })}>
+          <button key={x.k} className="tile" data-need={need(!!x.need || !!s.vm?.missing.some((m) => m.sheet === x.k))} onClick={() => s.open({ kind: x.k })}>
             <Badge mark={TILE_MARK[x.k] ?? { icon: x.icon, tone: 'var(--green)' }} size={30} />
             <span className="t">{x.t}</span>
-            <span className="v">{x.need ? '入力してください' : x.v}</span>
+            <span className="v">{x.need ? '入力してください' : s.vm?.missing.some((m) => m.sheet === x.k) ? `未入力 ${s.vm.missing.filter((m) => m.sheet === x.k).length}件` : x.v}</span>
           </button>
         ))}
       </div>

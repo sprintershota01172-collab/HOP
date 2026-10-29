@@ -4,7 +4,7 @@ import React from 'react';
  * ぽっぽさん（アプリのキャラクター）: 屋根の帽子をかぶった、まるいハト。
  * mood: happy = 安心・標準、normal、worry = 注意・危険・赤字
  */
-export function Mascot({ size = 72, mood = 'normal', className }: { size?: number; mood?: 'happy' | 'normal' | 'worry'; className?: string }) {
+export function Mascot({ size = 72, mood = 'normal', pose = 'stand', className }: { size?: number; mood?: 'happy' | 'normal' | 'worry'; pose?: 'stand' | 'wave' | 'think'; className?: string }) {
   return (
     <svg className={`mascot ${className ?? ''}`} width={size} height={size} viewBox="0 0 100 100" role="img" aria-label="ぽっぽさん">
       {/* しっぽ */}
@@ -35,7 +35,19 @@ export function Mascot({ size = 72, mood = 'normal', className }: { size?: numbe
       {/* くちばし */}
       <path d="M71 38 81 41 71 44Z" fill="#e39a45" strokeLinejoin="round" />
       {/* つばさ */}
-      <path d="M27 63c12-10 26-6 31 4-11 10-24 8-31-4Z" fill="#bfc8d6" />
+      {pose === 'wave' ? (
+        <path d="M28 58c-2-15 8-26 19-24 1 10-7 20-19 24Z" fill="#bfc8d6" />
+      ) : pose === 'think' ? (
+        <path d="M40 62c8-8 22-6 26 3-9 6-20 6-26-3Z" fill="#bfc8d6" />
+      ) : (
+        <path d="M27 63c12-10 26-6 31 4-11 10-24 8-31-4Z" fill="#bfc8d6" />
+      )}
+      {pose === 'think' && (
+        <>
+          <circle cx="84" cy="22" r="3" fill="#d9dfe8" />
+          <circle cx="90" cy="12" r="4.5" fill="#d9dfe8" />
+        </>
+      )}
       {/* あし */}
       <path d="M45 90v5M59 90v5" stroke="#e39a45" strokeWidth="3" strokeLinecap="round" />
       {/* 汗（心配なとき） */}
@@ -45,10 +57,10 @@ export function Mascot({ size = 72, mood = 'normal', className }: { size?: numbe
 }
 
 /** ぽっぽさんのひとこと */
-export function MascotSays({ text, mood = 'normal', size = 56 }: { text: string; mood?: 'happy' | 'normal' | 'worry'; size?: number }) {
+export function MascotSays({ text, mood = 'normal', pose = 'stand', size = 56 }: { text: string; mood?: 'happy' | 'normal' | 'worry'; pose?: 'stand' | 'wave' | 'think'; size?: number }) {
   return (
     <div className="mascot-says">
-      <Mascot size={size} mood={mood} />
+      <Mascot size={size} mood={mood} pose={pose} />
       <div className="bubble">{text}</div>
     </div>
   );

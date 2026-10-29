@@ -131,3 +131,20 @@ describe('年の途中から始まる項目', () => {
     assert.ok(loan.value < loan.perMonth!);
   });
 });
+
+describe('一般的な入力項目の入れ忘れ', () => {
+  it('未入力の賞与・額面年収・年金・生活費の項目・お小遣い・家賃・購入時期・子供の予定を知らせ、0を入れると消える', () => {
+    const d = household({ spouse: false });
+    const r = resolvePlan(d.plan);
+    const keys = r.missing.map((m) => m.key);
+    for (const k of ['living-electric', 'living-water', 'living-gas', 'living-phone', 'pocket-self']) assert.ok(keys.includes(k), k);
+    assert.ok(!keys.includes('self-bonus'), '賞与は入力済み');
+    const filled = withPlan(d, (p) => {
+      for (const [std, name] of [['electric', '電気代'], ['water', '水道代'], ['gas', 'ガス代'], ['phone', '携帯代']] as const) p.living.push({ id: uid(), name, icon: 'bolt', monthly: 0, kind: 'fixed', std });
+      p.pocket.self = 0;
+    });
+    const rest = resolvePlan(filled.plan).missing.map((m) => m.key);
+    assert.ok(!rest.some((k) => k.startsWith('living-') && k !== 'living-food'));
+    assert.ok(!rest.includes('pocket-self'));
+  });
+});
