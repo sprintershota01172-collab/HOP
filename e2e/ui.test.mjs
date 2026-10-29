@@ -488,12 +488,12 @@ describe('入力・保存・再計算', () => {
     assert.ok((await sheetOverflow(page)) <= 1, '子供の生活費');
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
-    // 共有（claude.ai の外では、ファイルで送る方法を案内する）
+    // 共有（ホーム画面のアプリでは招待リンクで始める）
     await page.click('button[aria-label="データと設定"]');
     await page.waitForTimeout(400);
     await sheet().locator('.seg button:has-text("共有")').click();
     await page.waitForTimeout(400);
-    assert.match(await sheet().textContent(), /claude\.ai/);
+    assert.match(await sheet().textContent(), /このデータで共有を始める.*届いた招待リンクで参加する/);
     assert.ok((await sheetOverflow(page)) <= 1, '共有の画面');
     await ctx.close();
   });
@@ -639,6 +639,107 @@ describe('夫婦で共有（claude.ai の保存領域を模したもの）', () 
     await settle(page);
     assert.notEqual(await heroText(page), mid, '知らせなくてもデータはそろう');
     await ctx.close();
+  });
+});
+
+describe('招待リンクで夫婦の端末をつなぐ（ホーム画面のアプリ）', () => {
+  // 同期サービス（暗号化ルーム）と同じ動きをする偽サーバー。2台の端末（別々のブラウザ）から使う
+  const API = 'https://tabi-planner-sync.prettybell7.chatgpt.site/api/rooms/';
+  const rooms = new Map();
+  const handler = async (route) => {
+    const req = route.request();
+    const id = req.url().slice(API.length);
+    const h = req.headers();
+    const room = rooms.get(id);
+    const res = (status, body, rev) => route.fulfill({ status, body, headers: { 'access-control-allow-origin': '*', 'access-control-expose-headers': 'X-Tabi-Revision', ...(rev ? { 'X-Tabi-Revision': String(rev) } : {}) } });
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,PUT' } });
+    if (req.method() === 'POST') {
+      rooms.set(id, { auth: h.authorization, body: req.postDataBuffer(), rev: 1 });
+      return res(201, '', 1);
+    }
+    if (!room) return res(404, '');
+    if (room.auth !== h.authorization) return res(403, '');
+    if (req.method() === 'GET') return h['if-none-match'] === `"${room.rev}"` ? res(304, '', room.rev) : res(200, room.body, room.rev);
+    if (Number(h['x-tabi-revision']) !== room.rev) return res(409, '', room.rev);
+    room.body = req.postDataBuffer();
+    room.rev++;
+    return res(200, '', room.rev);
+  };
+  const device = async () => {
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    await ctx.route(`${API}**`, handler);
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push(String(e)));
+    return { ctx, page, sheet: () => page.locator('.sheet:not(.closing)').last() };
+  };
+
+  it('共有を始めて招待リンクを送り、相手がリンクから参加すると、相手の更新が届いて知らせる', async () => {
+    // 夫: 共有を始める
+    const A = await device();
+    await A.page.goto(srv.url);
+    await A.page.waitForSelector('.hero .amount', { timeout: 20000 });
+    await settle(A.page);
+    await A.page.click('button[aria-label="データと設定"]');
+    await A.page.waitForTimeout(400);
+    await A.sheet().locator('.seg button:has-text("共有")').click();
+    await A.page.waitForTimeout(400);
+    const nameA = A.sheet().locator('.field:has-text("呼び名") input');
+    await nameA.fill('しょうた');
+    await nameA.press('Enter');
+    await A.sheet().locator('.btn:has-text("このデータで共有を始める")').click();
+    await A.page.waitForSelector('.sheet:not(.closing) .chip:has-text("共有中")', { timeout: 5000 });
+    const href = await A.sheet().locator('a:has-text("LINEで招待")').getAttribute('href');
+    assert.match(href, /^https:\/\/line\.me\/R\/share\?text=/);
+    const text = decodeURIComponent(href.split('text=')[1]);
+    assert.match(text, /しょうたから/);
+    const link = text.match(/https?:\S+#join=\S+/)[0];
+    assert.ok((await sheetOverflow(A.page)) <= 1, '共有の画面（共有中）');
+    await A.page.keyboard.press('Escape');
+    await A.page.waitForTimeout(400);
+    assert.equal(rooms.size, 1);
+    assert.ok(!rooms.values().next().value.body.toString('latin1').includes('plan'), 'サーバーには暗号化したデータだけ');
+
+    // 妻: 届いたリンクを開いて参加する（自分の端末は空のデータ）
+    const B = await device();
+    await B.page.goto(link.replace(/^https?:\/\/[^/]+\/?/, srv.url.replace(/\/?$/, '/')));
+    await B.page.waitForSelector('.sheet:not(.closing) h2:has-text("共有の招待")', { timeout: 20000 });
+    await B.page.waitForSelector('.sheet:not(.closing) .bubble:has-text("しょうたさんの家計に参加する")', { timeout: 5000 });
+    assert.ok((await sheetOverflow(B.page)) <= 1, '招待の画面');
+    const nameB = B.sheet().locator('.field:has-text("呼び名") input');
+    await nameB.fill('しほ');
+    await nameB.press('Enter');
+    await B.sheet().locator('.btn:has-text("参加する")').click();
+    await B.page.waitForSelector('.toast:has-text("しょうたさんの共有データに参加しました")', { timeout: 5000 });
+    await settle(B.page);
+    assert.equal(await heroText(B.page), await heroText(A.page), '同じデータになる');
+
+    // 妻がメモを追加 → 夫に届いて知らせる
+    await B.page.click('nav button:nth-child(5)');
+    await B.page.click('.btn.primary:has-text("メモ")');
+    await B.page.fill('#memo-title', '妻のメモ');
+    await B.page.click('.sheet-foot .btn.primary');
+    await A.page.waitForSelector('.toast:has-text("しほさんが更新しました")', { timeout: 12000 });
+    await A.page.click('nav button:nth-child(5)');
+    await A.page.waitForSelector('.memo:has-text("妻のメモ")', { timeout: 3000 });
+
+    // 夫の変更も妻に届く（逆向き）
+    await A.page.click('.btn.primary:has-text("メモ")');
+    await A.page.fill('#memo-title', '夫のメモ');
+    await A.page.click('.sheet-foot .btn.primary');
+    await B.page.waitForSelector('.toast:has-text("しょうたさんが更新しました")', { timeout: 12000 });
+    await B.page.waitForSelector('.memo:has-text("夫のメモ")', { timeout: 3000 });
+    assert.equal(await B.page.locator('.memo:has-text("妻のメモ")').count(), 1, '妻のメモも残る');
+
+    // 再読み込みしても共有はつながったまま
+    await A.page.reload();
+    await A.page.waitForSelector('.memo:has-text("妻のメモ")', { timeout: 20000 });
+    await A.page.click('button[aria-label="データと設定"]');
+    await A.page.waitForTimeout(400);
+    await A.sheet().locator('.seg button:has-text("共有")').click();
+    await A.page.waitForSelector('.sheet:not(.closing) .chip:has-text("共有中")', { timeout: 5000 });
+    await A.ctx.close();
+    await B.ctx.close();
   });
 });
 

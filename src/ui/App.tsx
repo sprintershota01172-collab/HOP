@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { SheetState } from './components/Sheet';
 import { Switcher } from './components/Switcher';
 import type { ReactElement } from 'react';
@@ -9,7 +9,7 @@ import { Home } from './screens/Home';
 import { Loan } from './screens/Loan';
 import { Memo } from './screens/Memo';
 import { HouseDetailSheet, HouseEditSheet, WeightsSheet } from './sheets/house';
-import { BasisSheet, ConfirmSheet, FpBasisSheet, LoanTermsSheet, MemoEditSheet, MissingSheet, PrepayEditSheet, SaleSheet, SettingsSheet, WizardSheet } from './sheets/misc';
+import { BasisSheet, ConfirmSheet, FpBasisSheet, LoanTermsSheet, MemoEditSheet, JoinRoomSheet, MissingSheet, PrepayEditSheet, SaleSheet, SettingsSheet, WizardSheet } from './sheets/misc';
 import {
   AssumptionsSheet, ChildEditSheet, ChildrenSheet, DebtEditSheet, EventEditSheet, EventsSheet, GoalEditSheet, GoalsSheet, HousingSheet, IncomeChangeSheet, IncomeSheet,
   InsEditSheet, InsuranceSheet, InvEditSheet, InvestSheet, LivingAddSheet, LivingItemsSheet, LivingEditSheet, LivingSheet, SavingsSheet, WorkEditSheet, WorkSheet,
@@ -22,7 +22,7 @@ const SHEETS: Record<string, (p: SheetProps) => ReactElement | null> = {
   living: LivingSheet, livingItems: LivingItemsSheet, livingAdd: LivingAddSheet, livingEdit: LivingEditSheet, insurance: InsuranceSheet, insEdit: InsEditSheet,
   invest: InvestSheet, invEdit: InvEditSheet, goals: GoalsSheet, goalEdit: GoalEditSheet, events: EventsSheet, eventEdit: EventEditSheet,
   work: WorkSheet, workEdit: WorkEditSheet, housing: HousingSheet, assumptions: AssumptionsSheet,
-  basis: BasisSheet, fpBasis: FpBasisSheet, loanTerms: LoanTermsSheet, prepayEdit: PrepayEditSheet, missing: MissingSheet, sale: SaleSheet, memoEdit: MemoEditSheet, settings: SettingsSheet,
+  basis: BasisSheet, fpBasis: FpBasisSheet, loanTerms: LoanTermsSheet, prepayEdit: PrepayEditSheet, missing: MissingSheet, sale: SaleSheet, memoEdit: MemoEditSheet, settings: SettingsSheet, joinRoom: JoinRoomSheet,
   confirm: ConfirmSheet, wizard: WizardSheet, houseEdit: HouseEditSheet, houseDetail: HouseDetailSheet, weights: WeightsSheet,
 };
 
@@ -45,6 +45,13 @@ export function App() {
     prev.current = s.tab;
   }
   const dir = dirRef.current;
+  // 招待リンクから開いたら、参加の確認を出す（1回だけ）
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!s.loaded || !s.pendingInvite || asked.current) return;
+    asked.current = true;
+    s.open({ kind: 'joinRoom', props: { link: `#join=${s.pendingInvite.roomId}.${s.pendingInvite.key}` } });
+  }, [s.loaded, s.pendingInvite]);
   return (
     <div className="app">
       <header className="top">

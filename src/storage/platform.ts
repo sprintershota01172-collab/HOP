@@ -25,6 +25,8 @@ const host = (): ClaudeHost | null => {
   return c && typeof c.use === 'function' ? c : null;
 };
 
+export const hasHost = (): boolean => host() !== null;
+
 export const isFramed = (): boolean => {
   try {
     return window.self !== window.top;
@@ -206,3 +208,18 @@ export async function shareFile(filename: string, text: string): Promise<'shared
     return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'unavailable';
   }
 }
+
+/** 文章とリンクを共有メニューで送る（使えなければ 'unavailable'） */
+export async function shareLink(text: string, url: string): Promise<'shared' | 'cancelled' | 'unavailable'> {
+  try {
+    const nav = navigator as Navigator & { share?: (d: unknown) => Promise<void> };
+    if (!nav.share || isFramed()) return 'unavailable';
+    await nav.share({ title: 'ほっぽさん', text, url });
+    return 'shared';
+  } catch (e) {
+    return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'unavailable';
+  }
+}
+
+/** LINE で送る画面を開くための URL */
+export const lineShareUrl = (text: string) => `https://line.me/R/share?text=${encodeURIComponent(text)}`;

@@ -8,7 +8,7 @@ import { ASSUME, CHECKED, SOURCES } from '../../engine/reference';
 import type { Memo, MemoCategory } from '../../engine/types';
 import { nowYM } from '../../engine/ym';
 import { listBackups, type Backup } from '../../storage/db';
-import { copyText, saveFile, shareFile } from '../../storage/platform';
+import { copyText, lineShareUrl, saveFile, shareFile, shareLink } from '../../storage/platform';
 import { DataError, migrate, toExport } from '../../storage/schema';
 import { Money } from '../components/bits';
 import { MoneyField, NumField, Pager, Seg, Toggle, useFit, usePages, YMField } from '../components/fields';
@@ -730,38 +730,86 @@ export function MemoEditSheet({ close, props }: SheetProps) {
 }
 
 /* ---------- 夫婦で共有 ---------- */
+const inviteMessage = (name: string, link: string) => `${name ? `${name}から` : ''}ほっぽさんの家計の共有の招待です。リンクを開いて「参加する」を押してね（ホーム画面のアプリで使うときは、開いた画面のまま「ホーム画面に追加」）\n${link}`;
+
 function SharePanel() {
   const s = useStore();
   const sh = s.share;
+  const [paste, setPaste] = useState<string | null>(null);
   const when = (t: number) => new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   if (!sh.available)
     return (
       <div className="stack" style={{ gap: 8 }}>
-        <MascotSays mood="normal" pose="think" size={48} text="2人で同じデータを見るには、claude.ai のアプリとして開いてね" />
+        <MascotSays mood="normal" pose="think" size={48} text="このブラウザでは自動の共有が使えないよ" />
         <div className="card stack" style={{ gap: 4 }}>
           <span className="label">いま使える方法</span>
           <div className="micro">「データ」の「書き出す・送る」で LINE などに送り、相手は「ファイルを読む」で取り込みます（自動ではそろいません）。</div>
         </div>
       </div>
     );
-  const last = sh.last ? `${when(sh.last.at)}　${sh.last.mine ? 'あなた' : `${sh.last.name || '相手'}さん`}` : 'まだ誰も共有していません';
+  const room = sh.kind === 'room';
+  const last = sh.last ? `${when(sh.last.at)}　${sh.last.mine ? 'あなた' : `${sh.last.name || '相手'}さん`}` : 'まだ共有していません';
+  const nameField = <TextField label="あなたの呼び名（相手の通知に出ます）" value={sh.myName} placeholder="例: しょうた" onChange={s.setMyName} />;
+  const sendInvite = async () => {
+    if (!sh.invite) return;
+    const msg = inviteMessage(sh.myName, sh.invite);
+    const r = await shareLink(msg.split('\n')[0], sh.invite);
+    if (r === 'shared' || r === 'cancelled') return;
+    if (await copyText(sh.invite)) s.notify('招待リンクをコピーしました。LINE に貼り付けて送ってください');
+  };
+  const pasteJoin = async () => {
+    const p = await s.peekInvite(paste ?? '');
+    if (!p) return s.notify('招待リンクを読み取れませんでした。届いたリンクをそのまま貼り付けてください');
+    s.open({ kind: 'joinRoom', props: { link: paste ?? '' } });
+    setPaste(null);
+  };
   return (
     <div className="stack" style={{ gap: 8 }}>
-      <MascotSays mood="happy" pose="wave" size={48} text={sh.on ? '2人の変更は自動でそろうよ' : '共有すると、2人の画面がいつも同じになるよ'} />
+      <MascotSays mood="happy" pose="wave" size={44} text={sh.on ? '2人の変更は自動でそろうよ' : room ? '招待リンクを LINE で送ると、2人のアプリがいつも同じになるよ' : '共有すると、2人の画面がいつも同じになるよ'} />
       <div className="card stack" style={{ gap: 4 }}>
         <div className="row between">
           <span className="label">夫婦で共有</span>
-          <span className={`chip ${sh.on ? 'tier-safe' : ''}`}>{sh.on ? (sh.status === 'ok' ? '共有中' : sh.status === 'too-big' ? 'データが大きすぎます' : '保存に失敗') : 'オフ'}</span>
+          <span className={`chip ${sh.on ? 'tier-safe' : ''}`}>{sh.on ? (sh.status === 'ok' ? '共有中' : sh.status === 'too-big' ? 'データが大きすぎます' : 'つながりません') : 'オフ'}</span>
         </div>
         <div className="micro">最終更新：{last}</div>
       </div>
+      {room && nameField}
       {sh.on ? (
         <>
+          {room && sh.invite && (
+            <div className="grid2">
+              <a className="btn primary" href={lineShareUrl(inviteMessage(sh.myName, sh.invite))} target="_blank" rel="noopener noreferrer">
+                LINEで招待
+              </a>
+              <button className="btn" onClick={sendInvite}>
+                <Icon name="copy" />
+                ほかの方法で送る
+              </button>
+            </div>
+          )}
           <Toggle label="相手が更新したら知らせる" value={sh.notify} onChange={s.setShareNotify} />
-          <div className="micro">この画面を開いている間はすぐに、閉じていた間の更新は次に開いたときに知らせます。スマートフォンの通知（プッシュ）は届きません。</div>
-          <button className="btn" onClick={s.stopShare}>
+          <div className="micro">開いている間は数秒で、閉じていた間の更新は次に開いたときに知らせます（スマートフォンのプッシュ通知ではありません）。</div>
+          <button className="btn" onClick={() => s.open({ kind: 'confirm', props: { title: '共有をやめますか？', body: room ? 'この端末だけ共有から抜けます。いまのデータはこの端末に残ります。もう一度つなぐには招待リンクが必要です。' : 'いまのデータはこの端末に残ります。', ok: 'やめる', danger: true, run: s.stopShare } })}>
             共有をやめる
           </button>
+        </>
+      ) : room ? (
+        <>
+          <button className="btn primary" onClick={() => s.startShare('mine')}>
+            このデータで共有を始める
+          </button>
+          {paste == null ? (
+            <button className="btn" onClick={() => setPaste('')}>
+              届いた招待リンクで参加する
+            </button>
+          ) : (
+            <div className="row" style={{ gap: 6 }}>
+              <input className="inp grow" placeholder="招待リンクを貼り付け" value={paste} onInput={(e: Event) => setPaste((e.target as HTMLInputElement).value)} />
+              <button className="btn primary small" onClick={pasteJoin}>
+                確かめる
+              </button>
+            </div>
+          )}
         </>
       ) : sh.last ? (
         <div className="grid2">
@@ -777,8 +825,78 @@ function SharePanel() {
           このデータで共有を始める
         </button>
       )}
-      <div className="micro">相手にはこのアプリ（claude.ai のアーティファクト）を「編集できる」権限で共有してください。見るだけの権限では相手は変更できません。</div>
+      <div className="micro">
+        {room
+          ? 'データは暗号化して保存し、鍵は招待リンクにだけ入ります（TABI・家賃デスと同じ同期サービス）。リンクを知っている人は編集できるので、相手以外には送らないでください。'
+          : '相手にはこのアプリ（claude.ai のアーティファクト）を「編集できる」権限で共有してください。見るだけの権限では相手は変更できません。'}
+      </div>
     </div>
+  );
+}
+
+function TextField({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
+  const [v, setV] = useState(value);
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input className="inp" value={v} placeholder={placeholder} maxLength={20} onInput={(e: Event) => setV((e.target as HTMLInputElement).value)} onBlur={() => onChange(v)} onKeyDown={(e: KeyboardEvent) => e.key === 'Enter' && onChange(v)} />
+    </label>
+  );
+}
+
+/** 招待リンクを開いたとき: だれの共有か確かめて参加する */
+export function JoinRoomSheet({ close, props }: SheetProps) {
+  const s = useStore();
+  const [info, setInfo] = useState<Awaited<ReturnType<typeof s.peekInvite>> | 'loading' | 'error'>('loading');
+  const [busy, setBusy] = useState(false);
+  const link = (props.link as string) ?? '';
+  useEffect(() => {
+    let alive = true;
+    s.peekInvite(link).then((r) => alive && setInfo(r ?? 'error'));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link]);
+  const done = () => {
+    s.clearPendingInvite();
+    close();
+  };
+  return (
+    <Sheet title="共有の招待" onClose={done}>
+      {info === 'loading' ? (
+        <MascotSays mood="normal" pose="think" size={48} text="招待を確かめているよ…" />
+      ) : info === 'error' || info == null ? (
+        <>
+          <MascotSays mood="worry" pose="think" size={48} text="招待を読み取れなかったよ" />
+          <div className="micro">リンクが途中で切れていないか、インターネットにつながっているか確かめてください。相手が共有をやめた場合は、新しい招待リンクをもらってください。</div>
+          <button className="btn" onClick={done}>
+            閉じる
+          </button>
+        </>
+      ) : (
+        <>
+          <MascotSays mood="happy" pose="wave" size={48} text={`${info.name ? `${info.name}さん` : '相手'}の家計に参加する？`} />
+          <div className="card stack" style={{ gap: 4 }}>
+            <div className="micro">参加すると、この端末のデータが共有のデータ（住宅{info.houses}件など）に置き換わり、これからは2人の変更が自動でそろいます。直後なら「元に戻す」で戻せます。</div>
+          </div>
+          <TextField label="あなたの呼び名（相手の通知に出ます）" value={s.share.myName} placeholder="例: しほ" onChange={s.setMyName} />
+          <button
+            className="btn primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              const ok = await s.joinInvite(info.invite);
+              setBusy(false);
+              if (ok) done();
+            }}
+          >
+            参加する
+          </button>
+          <div className="micro">iPhone でホーム画面のアプリとして使う場合は、参加したあと、この画面のまま共有ボタン →「ホーム画面に追加」をしてください（Safari とホーム画面のアプリはデータの保存場所が別です）。すでに追加したアプリでは「データと設定 → 共有 → 届いた招待リンクで参加する」に貼り付けます。</div>
+        </>
+      )}
+    </Sheet>
   );
 }
 

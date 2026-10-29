@@ -6,7 +6,8 @@ import type { Lever } from '../engine/explain';
 import { computeLevers, computeLoan, computeView, type LoanRequest, type LoanView, type ViewModel } from '../engine/view';
 import { nowYM } from '../engine/ym';
 import { initStorage, loadData, saveData, type StorageKind } from '../storage/db';
-import { connectCloud, connectShared, type Cloud, type Shared, type SharedState } from '../storage/platform';
+import { connectCloud, connectShared, hasHost, type Cloud, type Shared, type SharedState } from '../storage/platform';
+import { createRoom, inviteLink, openRoom, parseInvite, readRoom, roomSupported, type Invite, type RoomMeta } from '../storage/room';
 
 declare const __WORKER_SRC__: string;
 
@@ -106,11 +107,23 @@ export interface Store {
   startShare: (mode: 'mine' | 'theirs') => Promise<void>;
   stopShare: () => void;
   setShareNotify: (v: boolean) => void;
+  setMyName: (name: string) => void;
+  /** 招待リンクを開いた（または貼り付けた）とき: 部屋の中身を確かめる */
+  peekInvite: (link: string) => Promise<{ invite: Invite; name: string; houses: number } | null>;
+  joinInvite: (invite: Invite) => Promise<boolean>;
+  /** 起動したときの URL に入っていた招待（まだ参加していないもの） */
+  pendingInvite: Invite | null;
+  clearPendingInvite: () => void;
 }
 
-/** 夫婦での共有（claude.ai で開いたときだけ使える） */
+/** 夫婦での共有: claude.ai で開いたときはアカウントの共有領域、ホーム画面のアプリ（GitHub Pages）では招待リンクの暗号化ルーム */
 export interface ShareView {
   available: boolean;
+  kind: 'claude' | 'room' | null;
+  /** 相手に送る招待リンク（ルームのときだけ） */
+  invite: string | null;
+  /** 相手に表示する自分の呼び名 */
+  myName: string;
   on: boolean;
   /** 相手が更新したら知らせる（端末ごと・本人ごとの設定） */
   notify: boolean;
@@ -122,14 +135,19 @@ export interface ShareView {
 interface SharePrefs {
   on: boolean;
   notify: boolean;
+  name: string;
+  /** この端末の識別子（だれが更新したかを見分ける） */
+  client: string;
+  room: RoomMeta | null;
 }
+const newId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `c${Date.now()}${Math.random().toString(36).slice(2)}`);
 const PREF_KEY = 'hoppo-san:share';
 const readPrefs = (): SharePrefs => {
   try {
     const v = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null');
-    return { on: !!v?.on, notify: v?.notify !== false };
+    return { on: !!v?.on, notify: v?.notify !== false, name: typeof v?.name === 'string' ? v.name : '', client: typeof v?.client === 'string' ? v.client : newId(), room: v?.room?.roomId ? v.room : null };
   } catch {
-    return { on: false, notify: true };
+    return { on: false, notify: true, name: '', client: newId(), room: null };
   }
 };
 const writePrefs = (p: SharePrefs) => {
@@ -175,7 +193,17 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   /** 相手の更新を取り込んだ直後は、共有の場所へ書き戻さない */
   const fromShared = useRef(false);
   const firstSnap = useRef(true);
-  const [share, setShare] = useState<ShareView>({ available: false, on: prefs.current.on, notify: prefs.current.notify, status: 'ok', last: null });
+  const [share, setShare] = useState<ShareView>({ available: false, kind: null, invite: null, myName: prefs.current.name, on: prefs.current.on, notify: prefs.current.notify, status: 'ok', last: null });
+  const unwatch = useRef<(() => void) | null>(null);
+  const [pendingInvite, setPendingInvite] = useState<Invite | null>(() => {
+    const inv = typeof location !== 'undefined' ? parseInvite(location.hash) : null;
+    return inv && inv.roomId !== prefs.current.room?.roomId ? inv : null;
+  });
+  const savePrefs = (p: Partial<SharePrefs>) => {
+    prefs.current = { ...prefs.current, ...p };
+    writePrefs(prefs.current);
+  };
+  const base = () => (typeof location !== 'undefined' ? location.origin + location.pathname : '');
   const dirty = useRef(false);
   const compSeq = useRef(0);
 
@@ -215,10 +243,32 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   );
   const undoRef = useRef<() => void>(() => {});
 
+  /** 共有の場所につなぐ（つなぎ直すときは前の購読を外す） */
+  const attach = useCallback(
+    (sh: Shared) => {
+      unwatch.current?.();
+      (shared.current as { dispose?: () => void } | null)?.dispose?.();
+      shared.current = sh;
+      firstSnap.current = true;
+      unwatch.current = sh.watch(
+        (st) => void onShared(st),
+        () => setShare((v) => ({ ...v, status: 'error' })),
+      );
+    },
+    [onShared],
+  );
+  const attachRoom = useCallback(
+    (meta: RoomMeta) => {
+      const room = openRoom(meta, { id: prefs.current.client, name: () => prefs.current.name }, (m) => savePrefs({ room: m }));
+      attach(room);
+      setShare((v) => ({ ...v, invite: inviteLink(base(), meta) }));
+    },
+    [attach],
+  );
+
   // 起動: 保存先を確かめて読み込む（なければサンプルを表示）
   useEffect(() => {
     let alive = true;
-    let unwatch: (() => void) | null = null;
     (async () => {
       const kind = await initStorage();
       if (!alive) return;
@@ -228,16 +278,17 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
       setData(local ?? sampleData(nowYM()));
       if (!local) dirty.current = true;
       setLoaded(true);
-      // 夫婦で共有（claude.ai で開いた場合のみ）。購読は1つだけ
-      connectShared().then((sh) => {
-        if (!alive || !sh) return;
-        shared.current = sh;
-        setShare((v) => ({ ...v, available: true }));
-        unwatch = sh.watch(
-          (st) => void onShared(st),
-          () => setShare((v) => ({ ...v, status: 'error' })),
-        );
-      });
+      // 夫婦で共有。claude.ai ではアカウントの共有領域、ホーム画面のアプリでは招待リンクのルーム。購読は1つだけ
+      if (hasHost()) {
+        connectShared().then((sh) => {
+          if (!alive || !sh) return;
+          setShare((v) => ({ ...v, available: true, kind: 'claude' }));
+          attach(sh);
+        });
+      } else if (roomSupported()) {
+        setShare((v) => ({ ...v, available: true, kind: 'room' }));
+        if (prefs.current.on && prefs.current.room) attachRoom(prefs.current.room);
+      }
       // アカウントの保存領域（claude.ai で開いた場合のみ）
       const c = await connectCloud();
       if (!alive || !c) return;
@@ -258,9 +309,10 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
     })();
     return () => {
       alive = false;
-      unwatch?.();
+      unwatch.current?.();
+      (shared.current as { dispose?: () => void } | null)?.dispose?.();
     };
-  }, [notify, onShared]);
+  }, [notify, attach, attachRoom]);
 
   // 計算（入力が変わったときだけ。画面の切り替えや表示年の変更では再計算しない）
   useEffect(() => {
@@ -365,10 +417,25 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
 
   const startShare = useCallback(
     async (mode: 'mine' | 'theirs') => {
+      if (share.kind === 'room') {
+        // 新しい部屋を作って、いまのデータを置く → 招待リンクを相手に送る
+        try {
+          const d = { ...dataRef.current, sample: false, updatedAt: Date.now() };
+          const meta = await createRoom(d, { id: prefs.current.client, name: prefs.current.name });
+          savePrefs({ on: true, room: meta });
+          setShare((v) => ({ ...v, on: true, status: 'ok', last: { at: d.updatedAt, mine: true, name: '' } }));
+          setData(d);
+          attachRoom(meta);
+          notify('共有を始めました。招待リンクを相手に送ってください');
+        } catch (e) {
+          setShare((v) => ({ ...v, status: (e as Error)?.message === 'too-big' ? 'too-big' : 'error' }));
+          notify('共有を始められませんでした。インターネットにつながっているか確かめてください');
+        }
+        return;
+      }
       const sh = shared.current;
       if (!sh) return;
-      prefs.current = { ...prefs.current, on: true };
-      writePrefs(prefs.current);
+      savePrefs({ on: true });
       setShare((v) => ({ ...v, on: true }));
       try {
         if (mode === 'theirs') {
@@ -391,17 +458,60 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
         notify('共有の保存に失敗しました。編集の権限があるか確かめてください');
       }
     },
-    [notify],
+    [notify, share.kind, attachRoom],
   );
   const stopShare = useCallback(() => {
-    prefs.current = { ...prefs.current, on: false };
-    writePrefs(prefs.current);
-    setShare((v) => ({ ...v, on: false }));
+    if (share.kind === 'room') {
+      unwatch.current?.();
+      unwatch.current = null;
+      (shared.current as { dispose?: () => void } | null)?.dispose?.();
+      shared.current = null;
+      savePrefs({ on: false, room: null });
+      setShare((v) => ({ ...v, on: false, invite: null, last: null, status: 'ok' }));
+    } else {
+      savePrefs({ on: false });
+      setShare((v) => ({ ...v, on: false }));
+    }
     notify('共有をやめました。いまのデータはこの端末に残ります');
-  }, [notify]);
+  }, [notify, share.kind]);
+  const setMyName = useCallback((name: string) => {
+    savePrefs({ name: name.trim().slice(0, 20) });
+    setShare((v) => ({ ...v, myName: prefs.current.name }));
+  }, []);
+  const peekInvite = useCallback(async (link: string) => {
+    const invite = parseInvite(link);
+    if (!invite) return null;
+    try {
+      const r = await readRoom(invite);
+      return { invite, name: r.name, houses: r.state.data.houses.length };
+    } catch {
+      return null;
+    }
+  }, []);
+  const joinInvite = useCallback(
+    async (invite: Invite) => {
+      try {
+        const r = await readRoom(invite);
+        savePrefs({ on: true, room: r.meta });
+        fromShared.current = true;
+        dirty.current = true;
+        setUndoStack((h) => [dataRef.current, ...h].slice(0, 30));
+        setData({ ...r.state.data, sample: false, updatedAt: r.state.updatedAt });
+        setShare((v) => ({ ...v, on: true, status: 'ok', last: { at: r.state.updatedAt, mine: r.state.updatedBy === prefs.current.client, name: r.name } }));
+        attachRoom(r.meta);
+        setPendingInvite(null);
+        notify(`${r.name ? `${r.name}さんの` : ''}共有データに参加しました。これからは2人の変更が自動でそろいます`);
+        return true;
+      } catch {
+        notify('参加できませんでした。招待リンクが正しいか、インターネットにつながっているか確かめてください');
+        return false;
+      }
+    },
+    [notify, attachRoom],
+  );
+  const clearPendingInvite = useCallback(() => setPendingInvite(null), []);
   const setShareNotify = useCallback((v: boolean) => {
-    prefs.current = { ...prefs.current, notify: v };
-    writePrefs(prefs.current);
+    savePrefs({ notify: v });
     setShare((x) => ({ ...x, notify: v }));
   }, []);
 
@@ -444,7 +554,7 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   const value: Store = {
     data, loaded, vm, computing, update, replace, undo, canUndo: undoStack.length > 0, saveState, storage, cloud: cloudState,
     loan, levers, tab, setTab, viewYear, setViewYear, sheets, open, close, closeAll, toast, notify,
-    share, startShare, stopShare, setShareNotify,
+    share, startShare, stopShare, setShareNotify, setMyName, peekInvite, joinInvite, pendingInvite, clearPendingInvite,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
