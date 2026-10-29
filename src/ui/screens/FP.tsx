@@ -148,7 +148,7 @@ function Result() {
             <div className="donut-wrap">
               <Donut slices={pie.slices} income={pie.income} sel={cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 108 : 132} />
               <div className="legend" role="tablist" aria-label="内訳を見る項目">
-                {pie.slices.map((x) => (
+                {pie.slices.filter((x) => x.key === 'rest' || x.key === cur || Math.round(x.value) !== 0).map((x) => (
                   <button className="li" key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
                     <span className="ellipsis">
                       <Badge mark={x.key === 'rest' && x.value < 0 ? { icon: 'coins', tone: 'var(--red)' } : { ...SLICE_MARK[x.key], tone: SLICE_COLOR[x.key] }} size={20} />

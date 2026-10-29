@@ -166,6 +166,8 @@ export interface LifeEvent {
   inflate: boolean;
   /** 支出の時期から逆算して毎月積み立て、その積立から払う（1回だけ・数年ごとの支出） */
   fund?: boolean;
+  /** この支出のためにローンを組む（借入額・年数・金利。残りは現金か積立で払う） */
+  loan?: { amount: Yen; years: number; rate: number } | null;
 }
 
 export interface WorkChange {
@@ -267,7 +269,10 @@ export interface Assumptions {
   endAge: Age;
   /** 予備資金（生活費の何か月分） */
   reserveMonths: number;
+  /** 以前の版の子供の生活費（月額の目安）。今は使わない（childCostScale を使う） */
   childLiving: { preschool: Yen; elem: Yen; middleHigh: Yen; univ: Yen };
+  /** 子供の生活費（食費・衣類・日用品など）を調査の平均の何倍にするか（1 = 平均） */
+  childCostScale?: number;
   /** 老後の生活費（住居費除く・月・いまの価値）。null = 統計値を仮置き */
   retireLivingMonthly: Yen | null;
   childAllowance: boolean;

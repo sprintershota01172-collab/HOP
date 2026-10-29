@@ -191,7 +191,7 @@ export function resolvePlan(plan: Plan): Resolved {
       assumed.push({ key: `nursery-${c.id}`, label: `${c.name || '子供'}の0〜2歳保育料`, value: `月${man(ASSUME.nurseryMonthly)}（自治体で確認を）`, impact: 'low', sheet: 'children' });
   }
   if (plan.children.length > 0)
-    assumed.push({ key: 'childLiving', label: '子供の生活費（食費など）の加算', value: '年齢別の目安を使用', impact: 'mid', sheet: 'assumptions' });
+    assumed.push({ key: 'childLiving', label: '子供の生活費（食費・衣類・日用品など）', value: '年齢・学年別の全国調査の平均（2024年）を使用', impact: 'low', sheet: 'assumptions' });
   if (!a.childrenConfirmed && plan.children.length === 0)
     assumed.push({ key: 'children', label: '子供の予定', value: 'なしとして計算', impact: 'high', sheet: 'children' });
   if (h.maintenanceMonthly == null)

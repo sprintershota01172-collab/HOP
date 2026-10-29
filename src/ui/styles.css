@@ -642,3 +642,6 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
   .app .cands-empty .bubble::before { display: none; }
   .app .cands-empty .mascot-says { min-width: 0; max-width: 100%; }
 }
+
+button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600; min-height: 34px; padding: 0 12px; color: var(--ink-2); }
+.chip.on { background: var(--green); color: var(--on-green); }

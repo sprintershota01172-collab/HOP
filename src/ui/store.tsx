@@ -6,7 +6,7 @@ import type { Lever } from '../engine/explain';
 import { computeLevers, computeLoan, computeView, type LoanRequest, type LoanView, type ViewModel } from '../engine/view';
 import { nowYM } from '../engine/ym';
 import { initStorage, loadData, saveData, type StorageKind } from '../storage/db';
-import { connectCloud, type Cloud } from '../storage/platform';
+import { connectCloud, connectShared, type Cloud, type Shared, type SharedState } from '../storage/platform';
 
 declare const __WORKER_SRC__: string;
 
@@ -102,7 +102,43 @@ export interface Store {
   closeAll: () => void;
   toast: Toast | null;
   notify: (text: string, action?: Toast['action']) => void;
+  share: ShareView;
+  startShare: (mode: 'mine' | 'theirs') => Promise<void>;
+  stopShare: () => void;
+  setShareNotify: (v: boolean) => void;
 }
+
+/** 夫婦での共有（claude.ai で開いたときだけ使える） */
+export interface ShareView {
+  available: boolean;
+  on: boolean;
+  /** 相手が更新したら知らせる（端末ごと・本人ごとの設定） */
+  notify: boolean;
+  status: 'ok' | 'error' | 'too-big';
+  /** 共有データの最終更新（まだ誰も共有していなければ null） */
+  last: { at: number; mine: boolean; name: string } | null;
+}
+
+interface SharePrefs {
+  on: boolean;
+  notify: boolean;
+}
+const PREF_KEY = 'hoppo-san:share';
+const readPrefs = (): SharePrefs => {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREF_KEY) ?? 'null');
+    return { on: !!v?.on, notify: v?.notify !== false };
+  } catch {
+    return { on: false, notify: true };
+  }
+};
+const writePrefs = (p: SharePrefs) => {
+  try {
+    localStorage.setItem(PREF_KEY, JSON.stringify(p));
+  } catch {
+    /* 保存できない環境ではこの画面を開いている間だけ有効 */
+  }
+};
 
 const Ctx = createContext<Store | null>(null);
 export const useStore = (): Store => {
@@ -132,6 +168,14 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   const [sheets, setSheets] = useState<SheetSpec[]>([]);
   const [toast, setToast] = useState<Toast | null>(null);
   const cloud = useRef<Cloud | null>(null);
+  const shared = useRef<Shared | null>(null);
+  const prefs = useRef<SharePrefs>(readPrefs());
+  const dataRef = useRef<AppData>(data);
+  dataRef.current = data;
+  /** 相手の更新を取り込んだ直後は、共有の場所へ書き戻さない */
+  const fromShared = useRef(false);
+  const firstSnap = useRef(true);
+  const [share, setShare] = useState<ShareView>({ available: false, on: prefs.current.on, notify: prefs.current.notify, status: 'ok', last: null });
   const dirty = useRef(false);
   const compSeq = useRef(0);
 
@@ -141,9 +185,40 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
     setTimeout(() => setToast((t) => (t && t.id === id ? null : t)), action ? 5000 : 2600);
   }, []);
 
+  // 共有データが変わったとき: 表示を更新し、相手の新しい更新なら取り込む
+  const onShared = useCallback(
+    async (st: SharedState) => {
+      const sh = shared.current;
+      if (!sh) return;
+      const mine = st.updatedBy === sh.me;
+      const name = mine ? '' : st.updatedBy ? await sh.nameOf(st.updatedBy) : '';
+      setShare((v) => ({ ...v, status: 'ok', last: { at: st.updatedAt, mine, name } }));
+      const first = firstSnap.current;
+      firstSnap.current = false;
+      if (!prefs.current.on) return;
+      // 共有していない間にこの端末で変えた分は、開いたときに共有の場所へ送る
+      if (first && st.updatedAt < dataRef.current.updatedAt) {
+        sh.save(dataRef.current).catch(() => setShare((v) => ({ ...v, status: 'error' })));
+        return;
+      }
+      if (mine || st.updatedAt <= dataRef.current.updatedAt) return;
+      fromShared.current = true;
+      dirty.current = true;
+      setUndoStack((h) => [dataRef.current, ...h].slice(0, 30));
+      setData({ ...st.data, sample: false, updatedAt: st.updatedAt });
+      if (prefs.current.notify) {
+        const who = name ? `${name}さん` : '相手';
+        notify(first ? `前回のあとに${who}が更新した内容を読み込みました` : `${who}が更新しました`, { label: '元に戻す', run: () => undoRef.current() });
+      }
+    },
+    [notify],
+  );
+  const undoRef = useRef<() => void>(() => {});
+
   // 起動: 保存先を確かめて読み込む（なければサンプルを表示）
   useEffect(() => {
     let alive = true;
+    let unwatch: (() => void) | null = null;
     (async () => {
       const kind = await initStorage();
       if (!alive) return;
@@ -153,6 +228,16 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
       setData(local ?? sampleData(nowYM()));
       if (!local) dirty.current = true;
       setLoaded(true);
+      // 夫婦で共有（claude.ai で開いた場合のみ）。購読は1つだけ
+      connectShared().then((sh) => {
+        if (!alive || !sh) return;
+        shared.current = sh;
+        setShare((v) => ({ ...v, available: true }));
+        unwatch = sh.watch(
+          (st) => void onShared(st),
+          () => setShare((v) => ({ ...v, status: 'error' })),
+        );
+      });
       // アカウントの保存領域（claude.ai で開いた場合のみ）
       const c = await connectCloud();
       if (!alive || !c) return;
@@ -173,8 +258,9 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
     })();
     return () => {
       alive = false;
+      unwatch?.();
     };
-  }, [notify]);
+  }, [notify, onShared]);
 
   // 計算（入力が変わったときだけ。画面の切り替えや表示年の変更では再計算しない）
   useEffect(() => {
@@ -209,6 +295,18 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
         setSaveState('error');
       }
     }, 400);
+    const skipShared = fromShared.current;
+    fromShared.current = false;
+    const t3 = setTimeout(async () => {
+      const sh = shared.current;
+      if (!sh || !prefs.current.on || skipShared) return;
+      try {
+        await sh.save(data);
+        setShare((v) => ({ ...v, status: 'ok' }));
+      } catch (e) {
+        setShare((v) => ({ ...v, status: (e as Error)?.message === 'too-big' ? 'too-big' : 'error' }));
+      }
+    }, 1500);
     const t2 = setTimeout(async () => {
       if (!cloud.current) return;
       try {
@@ -221,6 +319,7 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
     return () => {
       clearTimeout(t);
       clearTimeout(t2);
+      clearTimeout(t3);
     };
   }, [data, loaded]);
 
@@ -262,6 +361,50 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
     });
   }, [notify]);
 
+  undoRef.current = undo;
+
+  const startShare = useCallback(
+    async (mode: 'mine' | 'theirs') => {
+      const sh = shared.current;
+      if (!sh) return;
+      prefs.current = { ...prefs.current, on: true };
+      writePrefs(prefs.current);
+      setShare((v) => ({ ...v, on: true }));
+      try {
+        if (mode === 'theirs') {
+          const st = await sh.load();
+          if (st) {
+            fromShared.current = true;
+            dirty.current = true;
+            setUndoStack((h) => [dataRef.current, ...h].slice(0, 30));
+            setData({ ...st.data, sample: false, updatedAt: st.updatedAt });
+            notify('共有データを読み込みました。これからは2人の変更が自動でそろいます');
+            return;
+          }
+        }
+        const d = { ...dataRef.current, sample: false, updatedAt: Date.now() };
+        await sh.save(d);
+        setData(d);
+        notify('共有を始めました。相手もこの画面を開くと同じデータになります');
+      } catch (e) {
+        setShare((v) => ({ ...v, status: (e as Error)?.message === 'too-big' ? 'too-big' : 'error' }));
+        notify('共有の保存に失敗しました。編集の権限があるか確かめてください');
+      }
+    },
+    [notify],
+  );
+  const stopShare = useCallback(() => {
+    prefs.current = { ...prefs.current, on: false };
+    writePrefs(prefs.current);
+    setShare((v) => ({ ...v, on: false }));
+    notify('共有をやめました。いまのデータはこの端末に残ります');
+  }, [notify]);
+  const setShareNotify = useCallback((v: boolean) => {
+    prefs.current = { ...prefs.current, notify: v };
+    writePrefs(prefs.current);
+    setShare((x) => ({ ...x, notify: v }));
+  }, []);
+
   const setTab = useCallback((t: Tab) => {
     setTabState(t);
     try {
@@ -301,6 +444,7 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   const value: Store = {
     data, loaded, vm, computing, update, replace, undo, canUndo: undoStack.length > 0, saveState, storage, cloud: cloudState,
     loan, levers, tab, setTab, viewYear, setViewYear, sheets, open, close, closeAll, toast, notify,
+    share, startShare, stopShare, setShareNotify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

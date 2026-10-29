@@ -439,6 +439,65 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('育休・時短をボタンで設定でき、大きな出費のローン・子供の生活費の表が画面に収まる', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    // 育休・時短（かんたん設定）
+    await page.click('.tile:has-text("育休・時短")');
+    await page.waitForTimeout(400);
+    const field = (label) => sheet().locator(`.field:has-text("${label}"):not(.pane.out .field)`).first();
+    await field('産休＋育休').locator('.chip:has-text("1歳半")').click();
+    await page.waitForTimeout(300);
+    assert.equal(await field('産休＋育休').locator('.chip.on').textContent(), '1歳半');
+    await field('時短勤務').locator('.chip:has-text("3歳まで")').click();
+    await page.waitForTimeout(300);
+    await sheet().locator('.seg button:has-text("5時間")').click();
+    await page.waitForTimeout(300);
+    assert.ok((await sheetOverflow(page)) <= 1, '育休・時短のかんたん設定');
+    await sheet().locator('.seg button:has-text("登録した予定")').click();
+    await page.waitForTimeout(400);
+    const list = await sheet().locator('.pane:not(.out)').last().textContent();
+    assert.match(list, /時短勤務.*勤務63%/);
+    assert.match(list, /19か月（産休含む）/);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 車の買い替え → ローン
+    await page.click('.tile:has-text("イベント")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.item:has-text("車の買い替え")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("ローン")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('button[aria-label="この支出はローンを組む"]').click();
+    await page.waitForTimeout(400);
+    assert.match(await sheet().locator('.card.flat').textContent(), /毎月の返済（60回）/);
+    assert.ok((await sheetOverflow(page)) <= 1, 'イベントのローン');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 子供の生活費（全国調査の表）
+    await page.click('.tile:has-text("前提条件")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("子供の生活費")').click();
+    await page.waitForTimeout(400);
+    assert.match(await sheet().textContent(), /小学生.*中学生.*高校生/);
+    assert.ok((await sheetOverflow(page)) <= 1, '子供の生活費');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 共有（claude.ai の外では、ファイルで送る方法を案内する）
+    await page.click('button[aria-label="データと設定"]');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("共有")').click();
+    await page.waitForTimeout(400);
+    assert.match(await sheet().textContent(), /claude\.ai/);
+    assert.ok((await sheetOverflow(page)) <= 1, '共有の画面');
+    await ctx.close();
+  });
+
   it('繰上返済・収入の変化・売却を入力でき、画面に収まる', async () => {
     const { ctx, page } = await open([375, 667]);
     await settle(page);
@@ -503,6 +562,82 @@ describe('入力・保存・再計算', () => {
     await page.click('nav button:nth-child(2)');
     const tf = await page.$eval('.main .pane', (e) => getComputedStyle(e).transform);
     assert.ok(tf === 'none' || /matrix\(1, 0, 0, 1, 0, 0\)/.test(tf), `transform: ${tf}`);
+    await ctx.close();
+  });
+});
+
+describe('夫婦で共有（claude.ai の保存領域を模したもの）', () => {
+  // claude.ai の db・user を、ブラウザ内のメモリで置き換える。__push で「相手の更新」を起こす
+  const stub = () => {
+    const docs = {};
+    const subs = {};
+    const snap = (path) => ({ id: path.split('/').pop(), exists: !!docs[path], data: () => (docs[path] ? { ...docs[path] } : undefined), metadata: { fromCache: false, hasPendingWrites: false } });
+    const fire = (path) => (subs[path] ?? []).forEach((fn) => fn(snap(path)));
+    const db = {
+      doc: (path) => ({
+        get: async () => snap(path),
+        set: async (body) => { docs[path] = body; setTimeout(() => fire(path), 0); },
+        onSnapshot: (next) => { (subs[path] ??= []).push(next); setTimeout(() => next(snap(path)), 0); return () => { subs[path] = subs[path].filter((f) => f !== next); }; },
+      }),
+    };
+    const user = { id: async () => 'me', profiles: async (ids) => Object.fromEntries([].concat(ids).map((i) => [i, { id: i, name: i === 'wife' ? 'はなこ' : '' }])) };
+    window.__docs = docs;
+    window.__push = (path, body) => { docs[path] = body; fire(path); };
+    window.claude = { use: async (n) => (n === 'db' ? db : n === 'user' ? user : null) };
+  };
+
+  it('共有を始めると共有の場所に保存され、相手が更新すると取り込んで知らせる（知らせない設定も選べる）', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    await ctx.addInitScript(stub);
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push(String(e)));
+    await page.goto(srv.url);
+    await page.waitForSelector('.hero .amount', { timeout: 20000 });
+    await settle(page);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    await page.click('button[aria-label="データと設定"]');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("共有")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('.btn:has-text("このデータで共有を始める")').click();
+    await page.waitForFunction(() => window.__docs['shared/household']?.updatedBy === 'me', null, { timeout: 5000 });
+    await page.waitForSelector('.sheet:not(.closing) .chip:has-text("共有中")');
+    assert.ok((await sheetOverflow(page)) <= 1, '共有の画面');
+    assert.equal(await sheet().locator('button[aria-label="相手が更新したら知らせる"]').getAttribute('aria-checked'), 'true');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 相手（はなこさん）が収入を変えた
+    const before = await heroText(page);
+    const partner = (net) => page.evaluate((net) => {
+      const cur = window.__docs['shared/household'];
+      const d = JSON.parse(cur.payload);
+      d.plan.self.netMonthly = net;
+      d.updatedAt = Date.now() + 1000;
+      window.__push('shared/household', { ...cur, payload: JSON.stringify(d), updatedAt: d.updatedAt, updatedBy: 'wife' });
+    }, net);
+    await partner(500_000);
+    await page.waitForSelector('.toast:has-text("はなこさんが更新しました")', { timeout: 5000 });
+    await settle(page);
+    assert.notEqual(await heroText(page), before, '相手の更新が反映される');
+    // 取り込んだ更新は、共有の場所へ自分の名前で書き戻さない
+    await page.waitForTimeout(2200);
+    assert.equal(await page.evaluate(() => window.__docs['shared/household'].updatedBy), 'wife');
+    // 知らせない設定
+    await page.click('button[aria-label="データと設定"]');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("共有")').click();
+    await page.waitForTimeout(400);
+    assert.match(await sheet().textContent(), /はなこさん/);
+    await sheet().locator('button[aria-label="相手が更新したら知らせる"]').click();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(3000);
+    const mid = await heroText(page);
+    await partner(250_000);
+    await page.waitForTimeout(1500);
+    assert.equal(await page.locator('.toast:has-text("更新しました")').count(), 0, '知らせない設定ではトーストを出さない');
+    await settle(page);
+    assert.notEqual(await heroText(page), mid, '知らせなくてもデータはそろう');
     await ctx.close();
   });
 });

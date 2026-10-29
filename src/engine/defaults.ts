@@ -32,6 +32,7 @@ export const defaultAssumptions = (): Assumptions => ({
   endAge: ASSUME.endAge,
   reserveMonths: ASSUME.reserveMonths,
   childLiving: { ...ASSUME.childLiving },
+  childCostScale: 1,
   retireLivingMonthly: null,
   childAllowance: true,
   leaveBenefits: true,

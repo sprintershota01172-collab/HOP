@@ -729,10 +729,63 @@ export function MemoEditSheet({ close, props }: SheetProps) {
   );
 }
 
+/* ---------- 夫婦で共有 ---------- */
+function SharePanel() {
+  const s = useStore();
+  const sh = s.share;
+  const when = (t: number) => new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  if (!sh.available)
+    return (
+      <div className="stack" style={{ gap: 8 }}>
+        <MascotSays mood="normal" pose="think" size={48} text="2人で同じデータを見るには、claude.ai のアプリとして開いてね" />
+        <div className="card stack" style={{ gap: 4 }}>
+          <span className="label">いま使える方法</span>
+          <div className="micro">「データ」の「書き出す・送る」で LINE などに送り、相手は「ファイルを読む」で取り込みます（自動ではそろいません）。</div>
+        </div>
+      </div>
+    );
+  const last = sh.last ? `${when(sh.last.at)}　${sh.last.mine ? 'あなた' : `${sh.last.name || '相手'}さん`}` : 'まだ誰も共有していません';
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      <MascotSays mood="happy" pose="wave" size={48} text={sh.on ? '2人の変更は自動でそろうよ' : '共有すると、2人の画面がいつも同じになるよ'} />
+      <div className="card stack" style={{ gap: 4 }}>
+        <div className="row between">
+          <span className="label">夫婦で共有</span>
+          <span className={`chip ${sh.on ? 'tier-safe' : ''}`}>{sh.on ? (sh.status === 'ok' ? '共有中' : sh.status === 'too-big' ? 'データが大きすぎます' : '保存に失敗') : 'オフ'}</span>
+        </div>
+        <div className="micro">最終更新：{last}</div>
+      </div>
+      {sh.on ? (
+        <>
+          <Toggle label="相手が更新したら知らせる" value={sh.notify} onChange={s.setShareNotify} />
+          <div className="micro">この画面を開いている間はすぐに、閉じていた間の更新は次に開いたときに知らせます。スマートフォンの通知（プッシュ）は届きません。</div>
+          <button className="btn" onClick={s.stopShare}>
+            共有をやめる
+          </button>
+        </>
+      ) : sh.last ? (
+        <div className="grid2">
+          <button className="btn primary" onClick={() => s.startShare('theirs')}>
+            共有データを使う
+          </button>
+          <button className="btn" onClick={() => s.open({ kind: 'confirm', props: { title: '自分のデータで共有しますか？', body: '共有されているデータを、この端末のデータで置き換えます。', ok: '置き換える', danger: true, run: () => s.startShare('mine') } })}>
+            自分のデータで上書き
+          </button>
+        </div>
+      ) : (
+        <button className="btn primary" onClick={() => s.startShare('mine')}>
+          このデータで共有を始める
+        </button>
+      )}
+      <div className="micro">相手にはこのアプリ（claude.ai のアーティファクト）を「編集できる」権限で共有してください。見るだけの権限では相手は変更できません。</div>
+    </div>
+  );
+}
+
 /* ---------- 設定・データ ---------- */
 export function SettingsSheet({ close }: SheetProps) {
   const s = useStore();
-  const [page, setPage] = useState<'data' | 'src' | 'about'>('data');
+  const [page, setPage] = useState<'data' | 'share' | 'src' | 'about'>('data');
   const [backups, setBackups] = useState<Backup[]>([]);
   const [paste, setPaste] = useState<string | null>(null);
   const [exportText, setExportText] = useState<string | null>(null);
@@ -753,7 +806,8 @@ export function SettingsSheet({ close }: SheetProps) {
   const cloudLabel = { off: '—', on: 'あなたのアカウントにも保存中（本人だけが読み書きできる領域）', error: 'アカウントへの保存に失敗', 'too-big': 'データが大きいためアカウントには保存していません' }[s.cloud];
   return (
     <Sheet title="データと設定" onClose={close}>
-      <Seg value={page} onChange={setPage} options={[{ value: 'data', label: 'データ' }, { value: 'src', label: '出典' }, { value: 'about', label: 'このアプリ' }]} />
+      <Seg value={page} onChange={setPage} options={[{ value: 'data', label: 'データ' }, { value: 'share', label: '共有' }, { value: 'src', label: '出典' }, { value: 'about', label: 'アプリ' }]} />
+      {page === 'share' && <SharePanel />}
       {page === 'data' && (
         <>
           <div className="card stack" style={{ gap: 4 }}>

@@ -6,11 +6,12 @@
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
-import { EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE } from '../../engine/reference';
+import { CHILD_COST, CHILD_COST_SOURCE, EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE } from '../../engine/reference';
 import { childMonth, eventMonths } from '../../engine/simulate';
 import { marginalTaxRate } from '../../engine/tax';
+import { annuityPayment } from '../../engine/loan';
 import type { Child, Debt, Insurance, Investment, LifeEvent, LivingItem, LivingStd, Owner, Person, Plan, WorkChange } from '../../engine/types';
-import { ageAt, nowYM, ymYear } from '../../engine/ym';
+import { ageAt, elemStartFY, nowYM, toYM, ymYear } from '../../engine/ym';
 import { Kpi } from '../components/bits';
 import { MoneyField, NumField, Seg, TextField, Toggle, YMField } from '../components/fields';
 import { ItemList } from '../components/ItemList';
@@ -396,6 +397,36 @@ function ChildEduIns({ c }: { c: Child }) {
   );
 }
 
+/** 子供の生活費（全国調査の平均・月額）を年齢・学年ごとに示す */
+function ChildCostTable({ scale }: { scale: number }) {
+  // 表の行: 調査の年齢・学年（CHILD_COST の行番号の範囲）
+  const rows: [string, number, number][] = [['0歳', 0, 0], ['1〜2歳', 1, 2], ['3〜6歳', 3, 6], ['小学生', 7, 12], ['中学生', 13, 15], ['高校生', 16, 18]];
+  const avg = (from: number, to: number, f: (r: (typeof CHILD_COST)[number]) => number) => {
+    let t = 0;
+    for (let k = from; k <= to; k++) t += f(CHILD_COST[k]);
+    return (t / (to - from + 1) / 12) * scale;
+  };
+  const all = (r: (typeof CHILD_COST)[number]) => r.food + r.clothes + r.goods + r.medical + r.phone + r.allowance + r.events + r.leisure;
+  return (
+    <div className="card flat stack" style={{ gap: 2 }}>
+      <div className="row between micro">
+        <span>子供1人の生活費（月・平均）</span>
+        <span>うち食費</span>
+      </div>
+      {rows.map(([l, from, to]) => (
+        <div key={l} className="row between" style={{ fontSize: 'var(--fs-s)' }}>
+          <span>{l}</span>
+          <span>
+            <b className="num">{yen(avg(from, to, all))}</b>
+            <span className="micro"> / {yen(avg(from, to, (r) => r.food))}</span>
+          </span>
+        </div>
+      ))}
+      <div className="micro" style={{ lineHeight: 1.5 }}>食費・衣類・日用品・医療・携帯・おこづかい・行事・レジャー（教育費と貯金は別に計算）。出典: {CHILD_COST_SOURCE}</div>
+    </div>
+  );
+}
+
 /* ============================== 生活費 ============================== */
 /** 「まとめて入力」の項目か（以前の版の「生活費（合計）」も同じ扱い） */
 export const isLump = (x: LivingItem) => !!x.lump || x.name === '生活費（合計）';
@@ -546,7 +577,7 @@ function LivingBase() {
         <b className="num">月{yen(total)}</b>
       </div>
       <div className="micro" style={{ lineHeight: 1.5 }}>
-        家賃・ローン・保険・教育費・積立は別の画面で入力します（ここに入れると二重に数えます）。子供の分は年齢に合わせて自動で加えます。
+        大人の分を入力します。子供の食費・衣類・おこづかいなどは年齢に合わせて自動で加えます。家賃・ローン・保険・教育費・積立は別の画面で入力します（ここに入れると二重に数えます）。
       </div>
     </>
   );
@@ -1009,9 +1040,11 @@ export function EventEditSheet({ close, props }: SheetProps) {
   const set = (fn: (x: LifeEvent) => void) => up((pl) => fn(pl.events.find((x) => x.id === e.id)!));
   return (
     <Sheet title={e.name} onClose={close} preview foot={<><DeleteBtn onDelete={() => { up((pl) => void (pl.events = pl.events.filter((x) => x.id !== e.id))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}>
-      <Paged pages={[{ value: 'basic', label: '内容' }, { value: 'more', label: '物価・アイコン' }]}>
+      <Paged initial={(props.page as 'basic' | 'loan' | 'more') ?? 'basic'} pages={[{ value: 'basic', label: '内容' }, ...(e.kind === 'expense' && e.pattern !== 'monthly' ? [{ value: 'loan' as const, label: 'ローン' }] : []), { value: 'more', label: '物価・アイコン' }]}>
         {(page) =>
-          page === 'basic' ? (
+          page === 'loan' ? (
+            <EventLoan e={e} set={set} />
+          ) : page === 'basic' ? (
             <>
             <div className="grid2">
               <TextField label="名前" value={e.name} onChange={(v) => set((x) => void (x.name = v))} />
@@ -1066,6 +1099,41 @@ export function EventEditSheet({ close, props }: SheetProps) {
   );
 }
 
+/** 大きな支出のローン（車のローンなど）: 借入額・年数・金利 → 毎月の返済。残りは現金か積立で払う */
+function EventLoan({ e, set }: { e: LifeEvent; set: (fn: (x: LifeEvent) => void) => void }) {
+  const L = e.loan ?? null;
+  const pay = L ? Math.round(annuityPayment(Math.min(L.amount, e.amount), L.rate / 12, L.years * 12)) : 0;
+  return (
+    <>
+      <Toggle label="この支出はローンを組む" hint="車・リフォームなど。翌月から毎月返済します" value={!!L} onChange={(v) => set((x) => void (x.loan = v ? { amount: Math.round((x.amount * 0.8) / 10_000) * 10_000, years: 5, rate: 0.025 } : null))} />
+      {L && (
+        <>
+          <div className="grid2">
+            <MoneyField label="借入額" nullable={false} value={L.amount} onChange={(v) => set((x) => void (x.loan = { ...L, amount: v ?? 0 }))} />
+            <NumField label="返済期間" unit="年" nullable={false} min={1} max={15} value={L.years} onChange={(v) => set((x) => void (x.loan = { ...L, years: Math.round(v ?? 5) }))} />
+          </div>
+          <NumField label="金利（年）" unit="%" scale={100} nullable={false} min={0} max={15} value={L.rate} onChange={(v) => set((x) => void (x.loan = { ...L, rate: v ?? 0 }))} hint="マイカーローンは年2〜4%程度が多い" />
+          <div className="card flat stack" style={{ gap: 4 }}>
+            <div className="row between">
+              <span className="micro">毎月の返済（{L.years * 12}回）</span>
+              <b className="num">{yen(pay)}</b>
+            </div>
+            <div className="row between">
+              <span className="micro">支払いの月に現金{e.fund ? '（積立）' : ''}で払う分</span>
+              <b className="num">{yen(Math.max(0, e.amount - L.amount))}</b>
+            </div>
+            <div className="row between">
+              <span className="micro">利息の合計</span>
+              <b className="num interest">{yen(pay * L.years * 12 - Math.min(L.amount, e.amount))}</b>
+            </div>
+          </div>
+          {e.pattern === 'repeat' && <div className="micro">数年ごとの支出は、そのたびに同じ条件でローンを組む計算です。</div>}
+        </>
+      )}
+    </>
+  );
+}
+
 /* ============================== 育休・時短 ============================== */
 export function WorkSection() {
   const { s, p, up } = usePlan();
@@ -1079,6 +1147,108 @@ export function WorkSection() {
     up((pl) => void pl.work.push({ id, owner, type, startYM: start, months: 12, endYM: child ? child.birthYM + 36 : nowYM() + 48, ratio: 0.75, maternity: type === 'leave', childId: child?.id ?? null }));
     s.open({ kind: 'workEdit', props: { id } });
   };
+  return (
+    <Paged initial={p.children.length ? 'quick' : 'list'} pages={[{ value: 'quick', label: 'かんたん設定' }, { value: 'list', label: `登録した予定 ${p.work.length}件` }]}>
+      {(page) => (page === 'quick' ? <WorkQuick /> : <WorkList nm={nm} add={add} />)}
+    </Paged>
+  );
+}
+
+/** 子供ごとに、産休・育休・時短をボタンで設定する（給付は自動で計算） */
+function WorkQuick() {
+  const { s, p, up } = usePlan();
+  const [cid, setCid] = useState(p.children[0]?.id ?? '');
+  const child = p.children.find((c) => c.id === cid) ?? p.children[0];
+  const [mom, setMom] = useState<Owner>(p.spouse ? 'spouse' : 'self');
+  if (!child) {
+    return (
+      <div className="empty fill">
+        <div>先に子供（予定）を登録すると、生まれる月に合わせて育休・時短を設定できます</div>
+        <button className="btn primary" onClick={() => s.open({ kind: 'children' })}>
+          子供を登録
+        </button>
+      </div>
+    );
+  }
+  const other: Owner = mom === 'self' ? 'spouse' : 'self';
+  const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
+  const find = (o: Owner, type: WorkChange['type'], mat?: boolean) => p.work.find((w) => w.childId === child.id && w.owner === o && w.type === type && (mat == null || w.maternity === mat));
+  const matLeave = find(mom, 'leave', true);
+  const pLeave = p.spouse ? find(other, 'leave', false) : undefined;
+  const short = find(mom, 'short');
+  // 産休＋育休: 出産の前月から、子供が指定の月齢になるまで
+  const setMat = (untilMonths: number | null) =>
+    up((pl) => {
+      pl.work = pl.work.filter((w) => !(w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity));
+      if (untilMonths != null) pl.work.push({ id: uid('work'), owner: mom, type: 'leave', startYM: child.birthYM - 1, months: untilMonths + 1, endYM: null, ratio: 1, maternity: true, childId: child.id });
+      fixShort(pl);
+    });
+  const setPLeave = (months: number | null) =>
+    up((pl) => {
+      pl.work = pl.work.filter((w) => !(w.childId === child.id && w.owner === other && w.type === 'leave' && !w.maternity));
+      if (months != null) pl.work.push({ id: uid('work'), owner: other, type: 'leave', startYM: child.birthYM, months, endYM: null, ratio: 1, maternity: false, childId: child.id });
+    });
+  // 時短: 育休が終わった月から、指定の時期まで。勤務時間（1日8時間に対する割合）で給与の割合を決める
+  const leaveEnd = (pl: Plan) => {
+    const l = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity);
+    return l ? l.startYM + l.months : child.birthYM + 12;
+  };
+  const fixShort = (pl: Plan) => {
+    const sw = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'short');
+    if (sw) sw.startYM = leaveEnd(pl);
+  };
+  const setShort = (until: 'none' | 'age3' | 'school', hours?: number) =>
+    up((pl) => {
+      const cur = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'short');
+      const h = hours ?? (cur ? Math.round(cur.ratio * 8) : 6);
+      pl.work = pl.work.filter((w) => w !== cur);
+      if (until === 'none') return;
+      const end = until === 'age3' ? child.birthYM + 36 - 1 : toYM(elemStartFY(child.birthYM), 3);
+      pl.work.push({ id: uid('work'), owner: mom, type: 'short', startYM: leaveEnd(pl), months: 0, endYM: end, ratio: h / 8, maternity: false, childId: child.id });
+    });
+  const matMonths = matLeave ? matLeave.months - 1 : null;
+  const shortUntil = !short ? 'none' : short.endYM != null && short.endYM <= child.birthYM + 36 ? 'age3' : 'school';
+  const chip = (on: boolean, label: string, run: () => void) => (
+    <button key={label} className={`chip${on ? ' on' : ''}`} aria-pressed={on ? 'true' : 'false'} onClick={run}>
+      {label}
+    </button>
+  );
+  return (
+    <>
+      {p.children.length > 1 && <Seg label="対象の子供" value={child.id} onChange={setCid} options={p.children.map((c) => ({ value: c.id, label: c.name }))} />}
+      {p.spouse && <Seg label="出産する人" value={mom} onChange={setMom} options={[{ value: 'spouse', label: nm('spouse') }, { value: 'self', label: nm('self') }]} />}
+      <div className="field">
+        <span>{nm(mom)}の産休＋育休（子供が何か月まで）</span>
+        <div className="chips">
+          {[[null, 'なし'], [6, '6か月'], [12, '1歳'], [18, '1歳半'], [24, '2歳']].map(([v, l]) => chip(matMonths === v || (v === null && matMonths === null), l as string, () => setMat(v as number | null)))}
+        </div>
+      </div>
+      {p.spouse && (
+        <div className="field">
+          <span>{nm(other)}の育休（生まれた月から）</span>
+          <div className="chips">
+            {[[null, 'なし'], [1, '1か月'], [3, '3か月'], [6, '6か月'], [12, '1年']].map(([v, l]) => chip((pLeave?.months ?? null) === v, l as string, () => setPLeave(v as number | null)))}
+          </div>
+        </div>
+      )}
+      <div className="field">
+        <span>{nm(mom)}の復帰後の時短勤務</span>
+        <div className="chips">
+          {chip(shortUntil === 'none', 'なし', () => setShort('none'))}
+          {chip(shortUntil === 'age3', '3歳まで', () => setShort('age3'))}
+          {chip(shortUntil === 'school', '小学校入学まで', () => setShort('school'))}
+        </div>
+      </div>
+      {short && (
+        <Seg label="時短の勤務時間（給与はフルタイム8時間に対する割合）" value={Math.round(short.ratio * 8)} onChange={(h) => setShort(shortUntil, h)} options={[{ value: 4, label: '4時間 50%' }, { value: 5, label: '5時間 63%' }, { value: 6, label: '6時間 75%' }, { value: 7, label: '7時間 88%' }]} />
+      )}
+      <div className="micro" style={{ lineHeight: 1.5 }}>給付は自動で計算: 産休は給与の2/3、育休は6か月まで67%・以降50%（両親とも育休なら最初の28日は+13%）、時短は2歳まで賃金の10%。</div>
+    </>
+  );
+}
+
+function WorkList({ nm, add }: { nm: (o: Owner) => string; add: (type: WorkChange['type']) => void }) {
+  const { s, p, up } = usePlan();
   return (
     <>
       <ItemList
@@ -1127,7 +1297,10 @@ export function WorkEditSheet({ close, props }: SheetProps) {
       {w.type === 'leave' ? (
         <Toggle label="産前産後休業を含む" hint="最初の3か月を出産手当金（賃金の2/3）として計算" value={w.maternity} onChange={(v) => set((x) => void (x.maternity = v))} />
       ) : (
-        <NumField label="勤務の割合（給与の割合）" unit="%" scale={100} nullable={false} min={10} max={100} value={w.ratio} onChange={(v) => set((x) => void (x.ratio = v ?? 1))} />
+        <>
+          <Seg label="1日の勤務時間（フルタイム8時間）" value={Math.round(w.ratio * 8 * 2) / 2} onChange={(h) => set((x) => void (x.ratio = h / 8))} options={[4, 5, 6, 7].map((h) => ({ value: h, label: `${h}時間` }))} />
+          <NumField label="給与の割合（自動）" unit="%" scale={100} nullable={false} min={10} max={100} value={w.ratio} onChange={(v) => set((x) => void (x.ratio = v ?? 1))} hint="勤務時間から計算。直接も変えられます" />
+        </>
       )}
       {p.children.length > 0 && (
         <Seg label="対象の子供" value={w.childId ?? ''} onChange={(v) => set((x) => void (x.childId = v || null))} options={[{ value: '', label: 'なし' }, ...p.children.map((c) => ({ value: c.id, label: c.name }))]} />
@@ -1239,13 +1412,9 @@ export function AssumptionsSection({ initial }: { initial?: 'eco' | 'life' | 'ki
           </>
         ) : (
           <>
-            <div className="micro">食費・日用品など、子供が増えた分の生活費（1人あたり・いまの物価）。目安の値なので、家計に合わせて変えてください。</div>
-            <div className="grid2">
-              <MoneyField label="未就学" per="month" nullable={false} value={a.childLiving.preschool} onChange={(v) => set((x) => void (x.childLiving.preschool = v ?? 0))} />
-              <MoneyField label="小学生" per="month" nullable={false} value={a.childLiving.elem} onChange={(v) => set((x) => void (x.childLiving.elem = v ?? 0))} />
-              <MoneyField label="中高生" per="month" nullable={false} value={a.childLiving.middleHigh} onChange={(v) => set((x) => void (x.childLiving.middleHigh = v ?? 0))} />
-              <MoneyField label="大学生" per="month" nullable={false} value={a.childLiving.univ} onChange={(v) => set((x) => void (x.childLiving.univ = v ?? 0))} />
-            </div>
+            <div className="micro">子供が増えると、年齢・学年に合わせて食費・日用品などを自動で足します（1人あたり・全国調査の平均）。家計に合わせて水準を変えられます。</div>
+            <ChildCostTable scale={a.childCostScale ?? 1} />
+              <NumField label="子供の生活費の水準" unit="%" scale={100} nullable={false} min={30} max={200} value={a.childCostScale ?? 1} onChange={(v) => set((x) => void (x.childCostScale = v ?? 1))} hint="全国平均を100%" />
           </>
         )
       }

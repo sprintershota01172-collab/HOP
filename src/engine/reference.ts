@@ -63,6 +63,16 @@ export const SOURCES: Source[] = [
     note: '育児休業給付 67%（180日まで）→50%。出生後休業支援給付 13%（最大28日）。時短就業給付は時短中賃金の10%。上限額は令和7年7月31日までの値（毎年8月改定）。',
   },
   {
+    id: 'child-cost-2024',
+    title: '日本における0〜18歳の子育てに要する費用の調査：ウェブアンケート調査2024',
+    org: '竹原健二ほか（国立成育医療研究センター）・日本公衆衛生雑誌 73(2)',
+    url: 'https://www.jsph.jp/docs/magazine/2026/02/73-2_p176.pdf',
+    published: '2026',
+    checked: CHECKED,
+    kind: 'stat',
+    note: '0〜6歳は年齢別、小1〜高3は学年別の年額（食費・衣類・生活用品・医療・携帯・おこづかい・行事・レジャー）を子供の生活費に使用。教育費は文部科学省の学習費調査で別に計算。',
+  },
+  {
     id: 'flat35-ratio',
     title: 'フラット35 商品概要説明書（総返済負担率）',
     org: '住宅金融支援機構（ゆうちょ銀行取扱分）',
@@ -247,6 +257,40 @@ export const PROPERTY_TAX = {
   newBuildYearsLonglife: 5,
   newBuildArea: 120,
 } as const;
+
+/**
+ * 子育て費用（生活費の部分・年額・円）。0〜6歳は年齢別、7番目以降は小1〜高3の学年別。
+ * 竹原健二ほか「日本における0〜18歳の子育てに要する費用の調査：ウェブアンケート調査2024」
+ * 日本公衆衛生雑誌 73(2):176-187, 2026（2024年11月調査、第一子の母親4,166人、各項目は3SD超を除いた平均）。
+ * 教育費（保育費・学校教育費・学校外教育費・学校外活動費）は教育費の計算（文部科学省「子供の学習費調査」）で別に計上し、
+ * 預貯金・保険は消費ではないため含めない。
+ */
+export const CHILD_COST_SOURCE = '竹原ほか「0〜18歳の子育てに要する費用の調査2024」日本公衆衛生雑誌73(2), 2026';
+export const CHILD_COST: { food: number; clothes: number; goods: number; medical: number; phone: number; allowance: number; events: number; leisure: number }[] = [
+  // 0〜6歳
+  { food: 169_719, clothes: 140_616, goods: 223_810, medical: 7_827, phone: 1_862, allowance: 1_605, events: 2_048, leisure: 19_396 },
+  { food: 277_417, clothes: 183_101, goods: 235_915, medical: 7_224, phone: 0, allowance: 530, events: 15_978, leisure: 43_732 },
+  { food: 243_957, clothes: 120_857, goods: 164_691, medical: 5_049, phone: 304, allowance: 779, events: 8_829, leisure: 49_043 },
+  { food: 321_123, clothes: 168_665, goods: 162_549, medical: 9_399, phone: 477, allowance: 299, events: 18_396, leisure: 66_704 },
+  { food: 286_920, clothes: 113_549, goods: 169_775, medical: 7_976, phone: 663, allowance: 2_187, events: 17_403, leisure: 75_892 },
+  { food: 313_000, clothes: 85_632, goods: 139_602, medical: 7_098, phone: 386, allowance: 1_525, events: 20_334, leisure: 86_760 },
+  { food: 336_380, clothes: 92_730, goods: 128_377, medical: 5_825, phone: 995, allowance: 1_436, events: 19_170, leisure: 113_385 },
+  // 小1〜小6
+  { food: 352_103, clothes: 163_468, goods: 202_476, medical: 7_316, phone: 6_821, allowance: 6_416, events: 32_779, leisure: 88_867 },
+  { food: 395_837, clothes: 123_060, goods: 127_740, medical: 7_520, phone: 11_841, allowance: 6_494, events: 18_217, leisure: 91_345 },
+  { food: 413_918, clothes: 152_058, goods: 139_664, medical: 6_918, phone: 18_918, allowance: 7_849, events: 18_786, leisure: 121_762 },
+  { food: 361_027, clothes: 138_502, goods: 151_326, medical: 5_326, phone: 16_239, allowance: 8_708, events: 12_999, leisure: 78_860 },
+  { food: 413_118, clothes: 154_912, goods: 139_304, medical: 7_955, phone: 22_235, allowance: 8_644, events: 14_625, leisure: 94_157 },
+  { food: 387_350, clothes: 116_474, goods: 111_488, medical: 6_305, phone: 28_186, allowance: 12_663, events: 12_990, leisure: 93_238 },
+  // 中1〜中3
+  { food: 471_906, clothes: 128_536, goods: 135_022, medical: 8_950, phone: 65_724, allowance: 27_868, events: 29_627, leisure: 99_258 },
+  { food: 480_578, clothes: 173_345, goods: 165_893, medical: 6_209, phone: 81_179, allowance: 35_369, events: 11_751, leisure: 84_836 },
+  { food: 428_986, clothes: 150_296, goods: 147_492, medical: 9_098, phone: 71_387, allowance: 38_372, events: 19_126, leisure: 75_567 },
+  // 高1〜高3
+  { food: 446_316, clothes: 169_984, goods: 182_029, medical: 16_002, phone: 112_508, allowance: 73_499, events: 45_585, leisure: 108_180 },
+  { food: 544_724, clothes: 141_008, goods: 172_871, medical: 18_437, phone: 124_644, allowance: 75_090, events: 12_302, leisure: 78_805 },
+  { food: 476_571, clothes: 128_463, goods: 168_780, medical: 17_600, phone: 120_987, allowance: 77_881, events: 16_226, leisure: 55_622 },
+];
 
 /* ---------- アプリの仮定（ユーザーが変更できる初期値） ---------- */
 export const ASSUME = {

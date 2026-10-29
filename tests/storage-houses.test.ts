@@ -74,7 +74,8 @@ describe('住宅比較', () => {
     const cc = computeAll(big);
     const e = cc.houses.find((x) => x.name === '豪邸')!;
     assert.equal(e.tier, 'danger');
-    assert.equal(e.rank, cc.houses.length);
+    const okRanks = cc.houses.filter((x) => x.tier !== 'danger').map((x) => x.rank);
+    assert.ok(okRanks.every((r) => r < e.rank), '資金不足でない住宅より後ろ');
     assert.ok(e.weakness && e.weakness.includes('資金不足'));
   });
 
@@ -82,8 +83,12 @@ describe('住宅比較', () => {
     const w = clone(d);
     w.weights = { price: 0, location: 5, layout: 0, performance: 0, upkeep: 0, warranty: 0, resale: 0, satisfaction: 0 };
     const cc = computeAll(w);
-    const top = cc.houses.find((x) => x.rank === 1)!;
-    assert.equal(top.name, 'B社 駅近');
+    // 重みを変えると点数が変わる（立地だけなら立地の評価が最も高い住宅が最高点）。並びは同じ段階の中で点数順
+    const best = [...cc.houses].sort((x, y) => y.totalScore - x.totalScore)[0];
+    assert.equal(best.name, 'B社 駅近');
+    assert.notEqual(cc.houses.find((x) => x.name === 'A社 2階建て')!.totalScore, c.houses.find((x) => x.name === 'A社 2階建て')!.totalScore);
+    const same = cc.houses.filter((x) => x.tier === 'caution').sort((x, y) => x.rank - y.rank);
+    for (let i = 1; i < same.length; i++) assert.ok(same[i - 1].totalScore >= same[i].totalScore);
   });
 
   it('適合度は 安心 > 標準 > 注意 > 危険 の順', () => {

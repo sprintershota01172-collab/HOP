@@ -1,5 +1,6 @@
 import { buildSchedule, ratePath, type LoanSchedule } from './loan';
-import { ASSUME, CHILD_ALLOWANCE, EDU_MEXT, EDU_UNIV, LEAVE } from './reference';
+import { ASSUME, CHILD_ALLOWANCE, CHILD_COST, EDU_MEXT, EDU_UNIV, LEAVE } from './reference';
+import { annuityPayment } from './loan';
 import type { Resolved, RPerson } from './resolve';
 import { deductionLimit, estimateDeductibleTax, estimatePropertyTax, marginalTaxRate } from './tax';
 import type { Child, EnergyClass, Investment, LoanTerms, Rate, Yen, YM } from './types';
@@ -165,10 +166,34 @@ export const EDU_PART_LABEL = {
 } as const;
 export type EduPart = keyof typeof EDU_PART_LABEL;
 
+/** 子供の生活費の内訳（childLivingOf の lv のキー） */
+export const CHILD_LIVING_LABEL = { food: '食費', wear: '衣類・日用品', misc: '医療・携帯・おこづかい', leisure: 'レジャー・行事' } as const;
+export type ChildLivingPart = keyof typeof CHILD_LIVING_LABEL;
+
+/**
+ * 子供1人のその月の生活費（物価補正前の今の価値・月額）。0〜6歳は年齢、小学生以降は学年で、調査の平均を使う。
+ * 大学生は高3と同じ（自宅外で仕送りがある場合は0。仕送りは教育費に入れる）。
+ */
+export function childLivingOf(c: Child, m: YM, scale = 1): Record<ChildLivingPart, number> {
+  const z = { food: 0, wear: 0, misc: 0, leisure: 0 };
+  if (m < c.birthYM) return z;
+  const g = gradeAt(c.birthYM, m);
+  const univEnd = 12 + (c.univ === 'none' ? 0 : c.univYears);
+  let row: (typeof CHILD_COST)[number] | null = null;
+  if (g <= 0) row = CHILD_COST[Math.min(6, Math.max(0, Math.floor((m - c.birthYM) / 12)))];
+  else if (g <= 12) row = CHILD_COST[6 + g];
+  else if (g <= univEnd && c.univAwayMonthly <= 0) row = CHILD_COST[18];
+  if (!row) return z;
+  const k = scale / 12;
+  return { food: row.food * k, wear: (row.clothes + row.goods) * k, misc: (row.medical + row.phone + row.allowance) * k, leisure: (row.events + row.leisure) * k };
+}
+
 /** 子供1人のその月の教育費と生活費加算（物価補正前の今の価値） */
-export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving']): { edu: Yen; living: Yen; once: Yen; parts: Partial<Record<EduPart, number>> } {
+export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving'], scale = 1): { edu: Yen; living: Yen; once: Yen; parts: Partial<Record<EduPart, number>>; lv: Record<ChildLivingPart, number> } {
   const parts: Partial<Record<EduPart, number>> = {};
-  if (m < c.birthYM) return { edu: 0, living: 0, once: 0, parts };
+  void childLiving;
+  const lv = childLivingOf(c, m, scale);
+  if (m < c.birthYM) return { edu: 0, living: 0, once: 0, parts, lv };
   const add = (k: EduPart, v: number) => {
     if (v) parts[k] = (parts[k] ?? 0) + v;
   };
@@ -176,11 +201,10 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
   const univEnd = 12 + (c.univ === 'none' ? 0 : c.univYears);
   const customOutside = c.lessonsMonthly != null || c.jukuMonthly != null;
   const outsideMonthly = (c.lessonsMonthly ?? 0) + (c.jukuMonthly ?? 0);
-  let living = 0;
+  const living = lv.food + lv.wear + lv.misc + lv.leisure;
   if (g <= -3) {
     const months = m - c.birthYM;
     if (c.nurseryUse && months >= c.nurseryStartAge * 12) add('nursery', c.nurseryMonthly ?? ASSUME.nurseryMonthly);
-    living = childLiving.preschool;
   } else if (g <= 0) {
     if (c.kinder !== 'none') {
       const row = EDU_MEXT.kinder[c.kinder];
@@ -189,20 +213,17 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
     } else {
       add('outside', customOutside ? outsideMonthly : EDU_MEXT.kinder.public.outside / 12);
     }
-    living = childLiving.preschool;
   } else if (g <= 12) {
     const stage = g <= 6 ? EDU_MEXT.elem : g <= 9 ? EDU_MEXT.middle : EDU_MEXT.high;
     const choice = g <= 6 ? c.elem : g <= 9 ? c.middle : c.high;
     const row = stage[choice];
     add('school', row.school / 12);
     add('outside', customOutside ? outsideMonthly : row.outside / 12);
-    living = g <= 6 ? childLiving.elem : childLiving.middleHigh;
   } else if (g <= univEnd) {
     const u = EDU_UNIV[c.univ as Exclude<typeof c.univ, 'none'>];
     add('univ', u.annual / 12);
     add('away', c.univAwayMonthly);
     add('outside', c.lessonsMonthly ?? 0);
-    living = childLiving.univ;
   }
   if (g >= -2 && g <= univEnd) add('other', c.otherAnnual / 12);
   // 大学の入学費用（受験料・併願校納付金を含む）は高3の2月に計上（一時的な支出）
@@ -213,7 +234,7 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
   }
   add('entrance', once);
   const edu = Object.values(parts).reduce((t, v) => t + (v ?? 0), 0);
-  return { edu, living, once, parts };
+  return { edu, living, once, parts, lv };
 }
 
 /** イベントが起きる月（start〜end の範囲） */
@@ -379,6 +400,25 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     f: mk(), salary: mk(), benefit: mk(), bonus: mk(), pension: mk(), retireBonus: mk(), allowance: mk(),
     living: mk(), education: mk(), educationOnce: mk(), insurance: mk(), debt: mk(), otherExpense: mk(), otherIncome: mk(), fundIn: mk(), fundOut: mk(), saveIn: mk(),
   };
+  // 大きな支出のローン: 支払いの月に借入額を差し引き、翌月から元利均等で返す
+  const loanPart = (e: (typeof plan.events)[number]) => (e.kind === 'expense' && e.pattern !== 'monthly' && e.loan && e.loan.amount > 0 && e.loan.years > 0 ? e.loan : null);
+  const evAmount = (e: (typeof plan.events)[number], ym: YM) => (e.inflate ? e.amount * Math.pow(1 + infl, ymYear(ym) - baseYear) : e.amount);
+  const evDebt = new Array<number>(n).fill(0);
+  for (const e of plan.events) {
+    const L = loanPart(e);
+    if (!L) continue;
+    for (const ym of eventMonths(e, r.start, r.end)) {
+      const borrow = Math.min(L.amount, evAmount(e, ym));
+      const nM = Math.round(L.years * 12);
+      const pay = Math.round(annuityPayment(borrow, L.rate / 12, nM));
+      for (let k = 1; k <= nM; k++) {
+        const j = ym + k - r.start;
+        if (j < 0 || j >= n) continue;
+        evDebt[j] += pay;
+        rec?.add(j, 'other', `evloan:${e.id}`, `${e.name}のローン`, pay, { sheet: 'eventEdit', props: { id: e.id, page: 'loan' } });
+      }
+    }
+  }
   // 目的別の積立: 1回だけ・数年ごとの支出を、前回の支払いの翌月（初回は今月）から支払いの前月までに均等に積み立て、積立から払う
   const funded = new Set<string>();
   for (const e of plan.events) {
@@ -388,7 +428,8 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     for (const ym of occ) {
       const months = ym - from;
       if (months > 0) {
-        const amount = Math.round(e.inflate ? e.amount * Math.pow(1 + infl, ymYear(ym) - baseYear) : e.amount);
+        const L = loanPart(e);
+        const amount = Math.round(Math.max(0, evAmount(e, ym) - (L ? Math.min(L.amount, evAmount(e, ym)) : 0)));
         const per = Math.floor(amount / months);
         for (let m = from; m < ym; m++) {
           const v = m === ym - 1 ? amount - per * (months - 1) : per;
@@ -469,12 +510,13 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     let edu = 0;
     let once = 0;
     for (const c of plan.children) {
-      const cm = childMonth(c, m, a.childLiving);
+      const cm = childMonth(c, m, a.childLiving, a.childCostScale ?? 1);
       edu += (cm.edu - cm.once) * f;
       once += cm.once * f;
       living += cm.living * f;
       if (rec) {
-        rec.add(i, 'living', `child:${c.id}`, `${c.name}の生活費（食費など）`, cm.living * f, { sheet: 'assumptions', props: { page: 'kids' } });
+        for (const k of Object.keys(cm.lv) as ChildLivingPart[])
+          rec.add(i, 'living', `child:${c.id}:${k}`, `${c.name}の${CHILD_LIVING_LABEL[k]}`, cm.lv[k] * f, { sheet: 'assumptions', props: { page: 'kids' } });
         for (const k of Object.keys(cm.parts) as EduPart[])
           rec.add(i, 'education', `${c.id}:${k}`, `${c.name} ${EDU_PART_LABEL[k]}`, (cm.parts[k] ?? 0) * f, { sheet: 'childEdit', props: { id: c.id }, once: k === 'entrance' });
       }
@@ -514,7 +556,7 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
         debt += d.monthly;
         rec?.add(i, 'other', `debt:${d.id}`, d.name, d.monthly, d.std === 'car' ? { sheet: 'living', props: { page: 'car' } } : { sheet: 'debtEdit', props: { id: d.id } });
       }
-    pre.debt[i] = Math.round(debt);
+    pre.debt[i] = Math.round(debt + evDebt[i]);
 
     let evOut = 0, evIn = 0;
     for (const e of plan.events) {
@@ -526,7 +568,9 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
         hit = m >= e.startYM && (m - e.startYM) % every === 0 && (e.endYM == null || m <= e.endYM);
       }
       if (!hit || funded.has(`${e.id}:${m}`)) continue;
-      const amt = e.inflate ? e.amount * f : e.amount;
+      const L = loanPart(e);
+      const full = e.inflate ? e.amount * f : e.amount;
+      const amt = L ? Math.max(0, full - Math.min(L.amount, full)) : full;
       const meta = { sheet: 'eventEdit', props: { id: e.id }, once: e.pattern !== 'monthly' };
       if (e.kind === 'expense') {
         evOut += amt;
