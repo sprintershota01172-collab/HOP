@@ -19,6 +19,7 @@ import { Icon } from '../icons';
 import { MEMO_CAT } from '../screens/Memo';
 import { useStore } from '../store';
 import { MascotSays } from '../Mascot';
+import { applyUpdate, BUILD, BUILT_AT, latestBuild } from '../update';
 import { ChildrenSection, Done, HousingSection, IncomeSection, InvestSection, LivingSection, SavingsSection, WorkSection, type SheetProps } from './plan';
 
 
@@ -1034,13 +1035,28 @@ export function SettingsSheet({ close }: SheetProps) {
           <div className="card flat">
             <b style={{ color: 'var(--ink)', fontSize: 'var(--fs-m)' }}>ほっぽさん</b>
             <br />
-            住宅購入とライフプランを一緒に考えるアプリ。計算はすべてこの端末の中で行い、入力したデータを外部に送りません
+            住宅購入とライフプランを一緒に考えるアプリ。計算はすべてこの端末の中で行います。入力したデータは、「共有」を始めた場合だけ暗号化して共有の場所に置きます
             {s.cloud === 'on' ? '（claude.ai で開いている場合は、あなたのアカウントの本人専用の領域にも保存します）' : ''}。
+            <br />
+            版 <b className="num">{BUILD}</b>
+            {BUILT_AT ? `（${BUILT_AT}）` : ''}
           </div>
+          <button
+            className="btn small"
+            onClick={async () => {
+              const b = await latestBuild();
+              if (!b) return s.notify('新しい版を確かめられませんでした（オフラインか、claude.ai で開いています）');
+              if (b === BUILD) return s.notify('最新の版です');
+              s.notify('新しい版を読み込みます');
+              void applyUpdate();
+            }}
+          >
+            新しい版を確かめる
+          </button>
           <div>
             <b style={{ color: 'var(--ink)' }}>ホーム画面に追加（iPhone）</b>
             <br />
-            Safariで開き、共有ボタン →「ホーム画面に追加」。オフラインでも使えます（GitHub Pages版）。
+            Safariで開き、共有ボタン →「ホーム画面に追加」。オフラインでも使えます（GitHub Pages版）。アプリの中身は自動で新しい版になりますが、ホーム画面のアイコンの絵は追加したときのままです（変えるには追加し直します）。
           </div>
           <div>
             <b style={{ color: 'var(--ink)' }}>ご注意</b>

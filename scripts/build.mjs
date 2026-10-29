@@ -28,8 +28,15 @@ async function bundle(entry, define) {
 }
 
 const css = await readFile(path.join(root, 'src/ui/styles.css'), 'utf8');
+// 版の番号: ソースとアイコンの中身から決める（同じ中身なら同じ番号）。ホーム画面のアプリが新しい版に気づくのに使う
+const { readdir } = await import('node:fs/promises');
+const walk = async (dir) => (await Promise.all((await readdir(dir, { withFileTypes: true })).map((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)])))).flat();
+const srcHash = createHash('sha256');
+for (const f of [...(await walk(path.join(root, 'src'))), ...(await walk(path.join(root, 'public')))].sort()) srcHash.update(f.slice(root.length)).update(await readFile(f));
+const BUILD = srcHash.digest('hex').slice(0, 8);
+const BUILT_AT = new Date().toISOString().slice(0, 10);
 const worker = await bundle('src/engine/worker.ts', {});
-const define = (pwa) => ({ __WORKER_SRC__: JSON.stringify(worker), __PWA__: String(pwa) });
+const define = (pwa) => ({ __WORKER_SRC__: JSON.stringify(worker), __PWA__: String(pwa), __BUILD__: JSON.stringify(BUILD), __BUILT_AT__: JSON.stringify(BUILT_AT) });
 const appPages = await bundle('src/ui/main.tsx', define(true));
 const appArtifact = await bundle('src/ui/main.tsx', define(false));
 const hash = createHash('sha256').update(appPages + css).digest('hex').slice(0, 10);
@@ -125,6 +132,7 @@ self.addEventListener('fetch', (e) => {
 `,
 );
 await writeFile(out('pages', '.nojekyll'), '');
+await writeFile(out('pages', 'version.json'), JSON.stringify({ build: BUILD, date: BUILT_AT }));
 
 /* ---------- claude.ai アーティファクト（1ファイル） ---------- */
 // 公開時の雛形が :root を安全領域の分だけ余白にするため、アプリ側の上下の安全領域は 0 にする

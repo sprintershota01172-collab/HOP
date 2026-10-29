@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { applyUpdate, useUpdateAvailable } from './update';
 import { SheetState } from './components/Sheet';
 import { Switcher } from './components/Switcher';
 import type { ReactElement } from 'react';
@@ -45,6 +46,7 @@ export function App() {
     prev.current = s.tab;
   }
   const dir = dirRef.current;
+  const updateReady = useUpdateAvailable();
   // 招待リンクから開いたら、参加の確認を出す（1回だけ）
   const asked = useRef(false);
   useEffect(() => {
@@ -92,6 +94,12 @@ export function App() {
           </SheetState.Provider>
         ) : null;
       })}
+      {updateReady && !s.toast && (
+        <div className="toast update" role="status">
+          <span>新しい版があります</span>
+          <button onClick={() => void applyUpdate()}>更新する</button>
+        </div>
+      )}
       {s.toast && (
         <div className="toast" role="status">
           <span>{s.toast.text}</span>

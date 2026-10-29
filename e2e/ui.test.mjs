@@ -743,6 +743,28 @@ describe('招待リンクで夫婦の端末をつなぐ（ホーム画面のア�
   });
 });
 
+describe('新しい版のお知らせ（ホーム画面のアプリ）', () => {
+  it('公開されている版が違うと「新しい版があります」を出し、同じなら出さない。設定に版を表示する', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+    await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (r) => r.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    await ctx.route(/version\.json/, (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ build: 'zzzzzzzz' }) }));
+    const page = await ctx.newPage();
+    await page.goto(srv.url);
+    await page.waitForSelector('.toast.update:has-text("新しい版があります")', { timeout: 20000 });
+    await ctx.close();
+    const same = await open();
+    await same.page.waitForTimeout(1500);
+    assert.equal(await same.page.locator('.toast.update').count(), 0);
+    await same.page.click('button[aria-label="データと設定"]');
+    await same.page.waitForTimeout(400);
+    await same.page.locator('.sheet:not(.closing) .seg button:has-text("アプリ")').click();
+    await same.page.waitForTimeout(300);
+    assert.match(await same.page.locator('.sheet:not(.closing)').textContent(), /版 [0-9a-f]{8}/);
+    assert.ok((await sheetOverflow(same.page)) <= 1, 'このアプリの画面');
+    await same.ctx.close();
+  });
+});
+
 describe('エラー', () => {
   it('ブラウザのエラーが出ていない', () => {
     assert.deepEqual(errors, []);
