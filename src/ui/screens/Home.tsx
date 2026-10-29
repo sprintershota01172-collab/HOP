@@ -5,6 +5,7 @@ import { useFit } from '../components/fields';
 import { yen } from '../format';
 import { Icon } from '../icons';
 import { Mascot, MascotSays } from '../Mascot';
+import { MARK } from '../emoji';
 import { useStore } from '../store';
 import { startNewHouse } from '../sheets/house';
 import { emptyData } from '../../engine/defaults';
@@ -76,7 +77,7 @@ export function Home() {
       <div className="card hero">
         <Mascot className="hero-mascot" size={64} mood={!t.standard.ok ? 'worry' : vm.loanBase && (vm.loanBase.tier === 'caution' || vm.loanBase.tier === 'danger') ? 'worry' : 'happy'} />
         <div className="row">
-          <span className="label">🏠 あなたの住宅購入予算</span>
+          <span className="label">あなたの住宅購入予算</span>
           <button className="chip" style={{ marginLeft: 'auto', position: 'relative' }} onClick={() => s.open({ kind: 'basis' })} aria-label="計算の内訳を見る">
             <Icon name="info" />
             計算の内訳・信頼度 {vm.confidence.level}
@@ -131,10 +132,10 @@ export function Home() {
 
       {m && (
         <div className="card kpis">
-          <Kpi label="💰 総返済額" v={m.totalPayment} sub={`うち利息 ${yen(m.totalInterest)}`} />
-          <Kpi label="🏠 毎月の住宅関連支出" v={m.monthlyHousing} sub={`うち返済 ${yen(m.loanMonthly)}`} />
-          <Kpi label="😊 購入後の生活余力（月）" v={m.surplus5y} sign sub="購入後5年の平均" />
-          <Kpi label="🐷 貯蓄（現金＋投資）" v={m.savingsNow} sub={<>10年後 {yen(m.savings10y)}</>} />
+          <Kpi mark={MARK.total} label="総返済額" v={m.totalPayment} sub={`うち利息 ${yen(m.totalInterest)}`} />
+          <Kpi mark={MARK.home} label="毎月の住宅関連支出" v={m.monthlyHousing} sub={`うち返済 ${yen(m.loanMonthly)}`} />
+          <Kpi mark={MARK.smile} label="購入後の生活余力（月）" v={m.surplus5y} sign sub="購入後5年の平均" />
+          <Kpi mark={MARK.saved} label="貯蓄（現金＋投資）" v={m.savingsNow} sub={<>10年後 {yen(m.savings10y)}</>} />
         </div>
       )}
 

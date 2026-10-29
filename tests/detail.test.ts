@@ -245,3 +245,34 @@ describe('ボーナスの扱い・毎月の貯金', () => {
     assert.equal(computeAll(s).rec.final.total, computeAll(d).rec.final.total, '貯金の設定で予算は変わらない（使わずに残すお金のため）');
   });
 });
+
+describe('月の収支: ふだんの月とボーナス月', () => {
+  it('賞与を6・12月に受け取る年は、ふだんの月（賞与なし）・ボーナス月・年平均を分けて出し、それぞれ内訳の合計が一致する', async () => {
+    const { monthPies } = await import('../src/engine/aggregate');
+    const c = computeAll(household());
+    const all = monthPies(c.fp!.sim, c.fp!.years);
+    const y = all[2];
+    assert.deepEqual(y.map((x) => x.kind), ['normal', 'bonus', 'avg']);
+    const normal = y[0], bonus = y[1];
+    assert.equal(normal.months, 10);
+    assert.equal(bonus.months, 2);
+    assert.ok(!normal.detail.rest.some((r) => r.label.includes('賞与')), 'ふだんの月に賞与は入らない');
+    assert.ok(bonus.detail.rest.some((r) => r.label.includes('賞与')), 'ボーナス月に賞与が入る');
+    assert.ok(bonus.income > normal.income);
+    for (const p of y)
+      for (const sl of p.slices) {
+        const sum = p.detail[sl.key].reduce((t, r) => t + (sl.key === 'rest' && r.op === '−' ? -r.value : r.value), 0);
+        assert.equal(sum, sl.value, `${p.kind} ${sl.label}`);
+      }
+  });
+  it('賞与を「月々に割る」場合は分けない（年平均だけ）', async () => {
+    const { monthPies } = await import('../src/engine/aggregate');
+    const d = withPlan(household(), (p) => {
+      p.self.bonusSpread = true;
+      p.spouse!.bonusSpread = true;
+    });
+    const c = computeAll(d);
+    const all = monthPies(c.fp!.sim, c.fp!.years);
+    assert.deepEqual(all[2].map((x) => x.kind), ['avg']);
+  });
+});

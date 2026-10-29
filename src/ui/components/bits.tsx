@@ -1,3 +1,4 @@
+import { Icon } from '../icons';
 import React from 'react';
 import type { ReactNode } from 'react';
 import { TIER_LABEL, type Tier } from '../../engine/recommend';
@@ -15,11 +16,23 @@ export function Money({ v, className, sign }: { v: number | null | undefined; cl
   );
 }
 
-export function Kpi({ label, v, sub, tone, sign, xl }: { label: string; v: number | null | undefined; sub?: ReactNode; tone?: 'neg' | 'pos' | 'interest'; sign?: boolean; xl?: boolean }) {
+/** 項目のしるし（色つきの小さなアイコン） */
+export function Badge({ mark, size = 22 }: { mark: { icon: string; tone: string }; size?: number }) {
+  return (
+    <span className="badge" style={{ '--tone': mark.tone, width: size, height: size }} aria-hidden="true">
+      <Icon name={mark.icon} size={Math.round(size * 0.64)} />
+    </span>
+  );
+}
+
+export function Kpi({ label, v, sub, tone, sign, xl, mark }: { label: string; v: number | null | undefined; sub?: ReactNode; tone?: 'neg' | 'pos' | 'interest'; sign?: boolean; xl?: boolean; mark?: { icon: string; tone: string } }) {
   const auto = tone ?? (v != null && v < 0 ? 'neg' : undefined);
   return (
     <div className="kpi">
-      <div className="label ellipsis">{label}</div>
+      <div className="label ellipsis">
+        {mark && <Badge mark={mark} size={18} />}
+        {label}
+      </div>
       <Money v={v} className={`${auto ?? ''} ${xl ? 'xl' : ''}`} sign={sign} />
       {sub && <div className="micro ellipsis">{sub}</div>}
     </div>

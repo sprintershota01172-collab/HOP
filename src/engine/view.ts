@@ -2,7 +2,7 @@
  * 画面に渡す計算結果（シリアライズ可能・必要な分だけ）。
  * Web Worker 内でも、メインスレッドでも同じ関数を使う。
  */
-import { monthPie, pieDetails, type PieDetail, type PieSlice, type YearRow } from './aggregate';
+import { monthPies, type MonthPie, type YearRow } from './aggregate';
 import { afterPurchase, breakdown, levers, scenarioChecks, type AfterPurchase, type Breakdown, type Lever, type ScenarioCheck } from './explain';
 import { goalStatus, type GoalStatus } from './goals';
 import type { HouseEval } from './houses';
@@ -102,7 +102,7 @@ export interface ViewModel {
   houses: HouseView[];
   /** 自己資金の算出に使った値 */
   downInfo: { cashBefore: Yen; needWithRent: Yen; gift: Yen; moving: Yen } | null;
-  fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; income: Yen; slices: PieSlice[]; withdraw: Yen; detail: PieDetail }[]; goals: GoalStatus[]; warnings: SimWarning[] } | null;
+  fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; list: MonthPie[] }[]; goals: GoalStatus[]; warnings: SimWarning[] } | null;
   ms: number;
 }
 
@@ -152,7 +152,7 @@ export function computeView(data: AppData): ViewModel {
           loan: x.loanBalance,
           delta: x.cash + x.fund - (i ? rows[i - 1].cash + rows[i - 1].fund : x.cash + x.fund),
         })),
-        pies: ((details) => c.fp!.years.map((y, i) => ({ year: y.year, ...monthPie(y), detail: details[i] })))(pieDetails(c.fp.sim, c.fp.years)),
+        pies: ((all) => c.fp!.years.map((y, i) => ({ year: y.year, list: all[i] })))(monthPies(c.fp.sim, c.fp.years)),
         goals: goalStatus(data.plan.goals, c.fp.sim),
         warnings: c.fp.sim.warnings,
       }

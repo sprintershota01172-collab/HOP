@@ -139,41 +139,89 @@ const SLICE_CAT: Record<Exclude<PieSlice['key'], 'rest'>, PartCat> = {
  * （月ごとの丸めの差は最も大きい行で調整する）。sim は detail 付きで計算したもの。
  */
 export function pieDetails(sim: SimResult, years: YearRow[]): PieDetail[] {
-  const parts = sim.parts ?? [];
   const out: PieDetail[] = [];
   let i0 = 0;
   for (const y of years) {
-    const n = Math.max(1, y.months);
-    const pie = monthPie(y);
-    const sums = new Map<PartCat, DetailRow[]>();
-    for (const pt of parts) {
-      let v = 0;
-      for (let i = i0; i < i0 + y.months; i++) v += pt.v[i];
-      if (Math.abs(v) < 0.5) continue;
-      const list = sums.get(pt.cat) ?? [];
-      list.push({ key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once });
-      sums.set(pt.cat, list);
+    out.push(detailOf(sim, Array.from({ length: y.months }, (_, k) => i0 + k), y));
+    i0 += y.months;
+  }
+  return out;
+}
+
+/** 指定した月（行の番号）の平均の内訳。y はその月だけを合計した YearRow */
+function detailOf(sim: SimResult, idx: number[], y: YearRow): PieDetail {
+  const parts = sim.parts ?? [];
+  const n = Math.max(1, y.months);
+  const pie = monthPie(y);
+  const sums = new Map<PartCat, DetailRow[]>();
+  for (const pt of parts) {
+    let v = 0;
+    for (const i of idx) v += pt.v[i];
+    if (Math.abs(v) < 0.5) continue;
+    const list = sums.get(pt.cat) ?? [];
+    list.push({ key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once });
+    sums.set(pt.cat, list);
+  }
+  const fit = (rows: DetailRow[] | undefined, total: Yen): DetailRow[] => {
+    const list = (rows ?? []).map((r) => ({ ...r, value: Math.round(r.value) })).filter((r) => r.value !== 0);
+    list.sort((a, b) => b.value - a.value);
+    const diff = total - list.reduce((t, r) => t + r.value, 0);
+    if (diff !== 0) {
+      if (list.length) list[0].value += diff;
+      else list.push({ key: 'rounding', label: 'その他', value: diff, sheet: '' });
     }
-    const fit = (rows: DetailRow[] | undefined, total: Yen): DetailRow[] => {
-      const list = (rows ?? []).map((r) => ({ ...r, value: Math.round(r.value) })).filter((r) => r.value !== 0);
-      list.sort((a, b) => b.value - a.value);
-      const diff = total - list.reduce((t, r) => t + r.value, 0);
-      if (diff !== 0) {
-        if (list.length) list[0].value += diff;
-        else list.push({ key: 'rounding', label: 'その他', value: diff, sheet: '' });
-      }
-      return list.filter((r) => r.value !== 0);
+    return list.filter((r) => r.value !== 0);
+  };
+  const d = {} as PieDetail;
+  for (const sl of pie.slices) {
+    if (sl.key === 'rest') continue;
+    d[sl.key] = fit(sums.get(SLICE_CAT[sl.key]), sl.value).map((r) => ({ ...r, op: '−' as const }));
+  }
+  const rest = pie.slices.find((x) => x.key === 'rest')!;
+  const income = fit(sums.get('income'), pie.income).map((r) => ({ ...r, op: '+' as const }));
+  d.rest = [...income, { key: 'spent', label: '支出と積立の合計', value: pie.income - rest.value, op: '−', sheet: '' }];
+  d.fundPaid = (sums.get('fundPaid') ?? []).map((r) => ({ ...r, value: Math.round(r.value * n) }));
+  return d;
+}
+
+export type PieKind = 'avg' | 'normal' | 'bonus';
+export interface MonthPie {
+  kind: PieKind;
+  months: number;
+  income: Yen;
+  slices: PieSlice[];
+  withdraw: Yen;
+  fundOut: Yen;
+  detail: PieDetail;
+}
+
+/**
+ * 年ごとの「月の収支」。賞与を6・12月に受け取る年は、
+ * ふだんの月（6・12月以外）とボーナス月（6・12月）を分けて出す（年平均だと賞与が毎月に割られて見えるため）
+ */
+export function monthPies(sim: SimResult, years: YearRow[]): MonthPie[][] {
+  const out: MonthPie[][] = [];
+  let i0 = 0;
+  for (const y of years) {
+    const all = Array.from({ length: y.months }, (_, k) => i0 + k);
+    const make = (kind: PieKind, idx: number[]): MonthPie => {
+      const yy = toYears({ ...sim, rows: idx.map((i) => sim.rows[i]) })[0];
+      const p = monthPie(yy);
+      return { kind, months: idx.length, ...p, detail: detailOf(sim, idx, yy) };
     };
-    const d = {} as PieDetail;
-    for (const sl of pie.slices) {
-      if (sl.key === 'rest') continue;
-      d[sl.key] = fit(sums.get(SLICE_CAT[sl.key]), sl.value).map((r) => ({ ...r, op: '−' as const }));
-    }
-    const rest = pie.slices.find((x) => x.key === 'rest')!;
-    const income = fit(sums.get('income'), pie.income).map((r) => ({ ...r, op: '+' as const }));
-    d.rest = [...income, { key: 'spent', label: '支出と積立の合計', value: pie.income - rest.value, op: '−', sheet: '' }];
-    d.fundPaid = (sums.get('fundPaid') ?? []).map((r) => ({ ...r, value: Math.round(r.value * n) }));
-    out.push(d);
+    const isBonusMonth = (i: number) => {
+      const mon = (sim.rows[i].ym % 12) + 1;
+      return mon === 6 || mon === 12;
+    };
+    const bonusIdx = all.filter(isBonusMonth);
+    const normalIdx = all.filter((i) => !isBonusMonth(i));
+    // 6・12月にだけ賞与がある（ほかの月にはない）年だけ分ける
+    const special = bonusIdx.some((i) => sim.rows[i].bonus > 0) && normalIdx.every((i) => sim.rows[i].bonus === 0);
+    const list: MonthPie[] = [];
+    if (special && normalIdx.length) list.push(make('normal', normalIdx));
+    if (special) list.push(make('bonus', bonusIdx));
+    list.push(make('avg', all));
+    out.push(list);
     i0 += y.months;
   }
   return out;

@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
-import type { DetailRow, PieSlice } from '../../engine/aggregate';
+import type { DetailRow, PieKind, PieSlice } from '../../engine/aggregate';
 import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
 import { AssetChart, Donut, MonthAssetChart, SLICE_COLOR, YearBars } from '../components/charts';
-import { Kpi, Money } from '../components/bits';
+import { Badge, Kpi, Money } from '../components/bits';
 import { useFit, usePages, useSwipe } from '../components/fields';
 import { Switcher } from '../components/Switcher';
 import { yen } from '../format';
 import { Icon } from '../icons';
-import { SLICE_EMOJI, TILE_EMOJI } from '../emoji';
+import { MARK, SLICE_MARK, TILE_MARK } from '../emoji';
 import { MascotSays } from '../Mascot';
 import { useStore } from '../store';
 import { Loading, SampleBanner } from './Home';
@@ -75,7 +75,10 @@ function Result() {
   ];
   const swipe = useSwipe(() => setYear(year + 1), () => setYear(year - 1));
   const yr = fp.years.find((y) => y.year === year)!;
-  const pie = fp.pies.find((p) => p.year === year)!;
+  const entry = fp.pies.find((p) => p.year === year)!;
+  // 賞与を6・12月に受け取る年は「ふだんの月」と「ボーナス月」を分ける（年平均も選べる）
+  const [kind, setKind] = useState<PieKind>('normal');
+  const pie = entry.list.find((x) => x.kind === kind) ?? entry.list[0];
   // 内訳を表示する項目（未選択なら、いちばん大きい支出）
   const [sel, setSel] = useState<PieSlice['key'] | null>(null);
   const biggest = [...pie.slices].filter((x) => x.key !== 'rest').sort((a, b) => b.value - a.value)[0]?.key ?? 'living';
@@ -124,21 +127,33 @@ function Result() {
         <Switcher k={view} dir={vdir}>
         {view === 'month' && (
           <>
+            {entry.list.length > 1 && (
+              <div className="row between" style={{ flex: 'none' }}>
+                <div className="seg mini" role="group" aria-label="どの月の収支か">
+                  {entry.list.map((x) => (
+                    <button key={x.kind} aria-pressed={pie.kind === x.kind ? 'true' : 'false'} onClick={() => setKind(x.kind)}>
+                      {x.kind === 'normal' ? 'ふだんの月' : x.kind === 'bonus' ? 'ボーナス月' : '年平均'}
+                    </button>
+                  ))}
+                </div>
+                <span className="micro ellipsis">{pie.kind === 'normal' ? '賞与なしの月' : pie.kind === 'bonus' ? '6・12月' : '賞与を12か月で平均'}</span>
+              </div>
+            )}
             <div className="donut-wrap">
               <Donut slices={pie.slices} income={pie.income} sel={cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 108 : 132} />
               <div className="legend" role="tablist" aria-label="内訳を見る項目">
                 {pie.slices.map((x) => (
                   <button className="li" key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
-                    <i style={{ background: x.key === 'rest' && x.value < 0 ? 'var(--red)' : SLICE_COLOR[x.key] }} />
                     <span className="ellipsis">
-                      {SLICE_EMOJI[x.key]} {x.label}
+                      <Badge mark={x.key === 'rest' && x.value < 0 ? { icon: 'coins', tone: 'var(--red)' } : { ...SLICE_MARK[x.key], tone: SLICE_COLOR[x.key] }} size={20} />
+                      {x.label}
                     </span>
                     <span className={`num ${x.key === 'rest' && x.value < 0 ? 'neg' : ''}`}>{yen(x.value)}</span>
                   </button>
                 ))}
               </div>
             </div>
-            <Detail key={`${cur}-${year}`} slice={pie.slices.find((x) => x.key === cur)!} rows={pie.detail[cur]} income={pie.income} months={yr.months} year={year} />
+            <Detail key={`${cur}-${year}`} slice={pie.slices.find((x) => x.key === cur)!} rows={pie.detail[cur]} income={pie.income} months={pie.months} year={year} />
             <Happenings year={year} />
             {pie.detail.fundPaid.length > 0 && (
               <div className="micro ellipsis" style={{ flex: 'none' }}>
@@ -151,10 +166,10 @@ function Result() {
         {view === 'year' && (
           <>
             <div className="grid2">
-              <Kpi label="💴 収入" v={yr.income} />
-              <Kpi label="🧾 支出" v={yr.spend} />
-              <Kpi label="🐷 貯金・積立・投資" v={yr.contrib + yr.fund + yr.save} />
-              <Kpi label="📊 年間収支" v={yr.net} sign />
+              <Kpi mark={MARK.income} label="収入" v={yr.income} />
+              <Kpi mark={MARK.spend} label="支出" v={yr.spend} />
+              <Kpi mark={MARK.saved} label="貯金・積立・投資" v={yr.contrib + yr.fund + yr.save} />
+              <Kpi mark={MARK.worth} label="年間収支" v={yr.net} sign />
             </div>
             <YearBars years={fp.years} year={year} onPick={setYear} retireYear={retireY} />
             {fp.goals.length > 0 && (
@@ -202,13 +217,13 @@ function Assets({ year, setYear }: { year: number; setYear: (y: number) => void 
         {mode === 'year' ? (
           <>
             <div className="grid3">
-              <Kpi label="💴 現金" v={yr.cashEnd} />
-              <Kpi label="📈 投資" v={yr.investEnd} />
-              <Kpi label="✨ 純資産" v={yr.netWorth} />
-              <Kpi label="🏦 ローン残高" v={yr.loanEnd} tone="interest" />
-              <Kpi label="🏠 住宅（参考評価）" v={yr.homeValue} />
+              <Kpi mark={MARK.cash} label="現金" v={yr.cashEnd} />
+              <Kpi mark={MARK.invest} label="投資" v={yr.investEnd} />
+              <Kpi mark={MARK.worth} label="純資産" v={yr.netWorth} />
+              <Kpi mark={MARK.loan} label="ローン残高" v={yr.loanEnd} tone="interest" />
+              <Kpi mark={MARK.home} label="住宅（参考評価）" v={yr.homeValue} />
               <div className="kpi">
-                <div className="label">🌱 運用益（年）</div>
+                <div className="label"><Badge mark={MARK.gain} size={18} />運用益（年）</div>
                 <Money v={yr.gain} />
               </div>
             </div>
@@ -224,11 +239,11 @@ function Assets({ year, setYear }: { year: number; setYear: (y: number) => void 
         ) : m ? (
           <>
             <div className="grid3">
-              <Kpi label="💴 現金" v={m.cash} />
-              <Kpi label="🐷 うち貯金" v={m.saved} />
-              <Kpi label="✈️ 積立中" v={m.fund} />
-              <Kpi label="📈 投資" v={m.invest} />
-              <Kpi label="🏦 ローン残高" v={m.loan} tone="interest" />
+              <Kpi mark={MARK.cash} label="現金" v={m.cash} />
+              <Kpi mark={MARK.saved} label="うち貯金" v={m.saved} />
+              <Kpi mark={MARK.fund} label="積立中" v={m.fund} />
+              <Kpi mark={MARK.invest} label="投資" v={m.invest} />
+              <Kpi mark={MARK.loan} label="ローン残高" v={m.loan} tone="interest" />
               <Kpi label="この月の増減" v={m.delta} sign />
             </div>
             <MonthAssetChart months={months} sel={idx} onPick={setMi} />
@@ -297,13 +312,15 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
     <div className="stack fill detail" style={{ gap: 2 }}>
       <div className="row" style={{ gap: 6 }}>
         <span className="label ellipsis grow" style={{ fontWeight: 700 }}>
-          {rest ? `💰 残額の計算（収入 ${yen(income)}）` : `${SLICE_EMOJI[slice.key]} ${slice.label}の内訳`}
+          <Badge mark={SLICE_MARK[slice.key]} size={18} />
+          {rest ? `残額の計算（収入 ${yen(income)}）` : `${slice.label}の内訳`}
           <small className="micro" style={{ fontWeight: 400 }}>
             {' '}
             {year}年・月平均{months < 12 ? `（${months}か月）` : ''}
             {rows.some((r) => r.once) ? `・一時＝年の合計÷${months}` : ''}
           </small>
         </span>
+        {rest && short && <b className={`num${slice.value < 0 ? ' neg' : ''}`} style={{ flex: 'none' }}>= {yen(slice.value)}</b>}
         {pg.pages > 1 && (
           <span className="minipager">
             <button disabled={pg.page === 0} onClick={() => pg.setPage(pg.page - 1)} aria-label="前のページ">
@@ -335,7 +352,7 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
           ))}
         </div>
       )}
-      {rest && (
+      {rest && !short && (
         <div className="wf">
           <div className="total" style={{ paddingTop: 2 }}>
             <span className="op">=</span>
@@ -392,9 +409,7 @@ function Inputs() {
       <div className="tiles">
         {tiles.map((x) => (
           <button key={x.k} className="tile" data-need={need(!!x.need)} onClick={() => s.open({ kind: x.k })}>
-            <span className="ic emoji" aria-hidden="true">
-              {TILE_EMOJI[x.k] ?? <Icon name={x.icon} />}
-            </span>
+            <Badge mark={TILE_MARK[x.k] ?? { icon: x.icon, tone: 'var(--green)' }} size={30} />
             <span className="t">{x.t}</span>
             <span className="v">{x.need ? '入力してください' : x.v}</span>
           </button>

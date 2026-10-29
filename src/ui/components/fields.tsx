@@ -42,6 +42,8 @@ export function MoneyField(props: {
   placeholder?: string;
   id?: string;
   required?: boolean;
+  /** 項目のしるし（色つきのアイコン） */
+  mark?: { icon: string; tone: string };
 }) {
   const per = props.per ?? 'once';
   const { text, setText, focused } = useDraft(props.value, manText);
@@ -59,6 +61,11 @@ export function MoneyField(props: {
     <label className="field" htmlFor={id}>
       <span className="row between" style={{ gap: 6 }}>
         <span className="ellipsis">
+          {props.mark && (
+            <span className="badge" style={{ '--tone': props.mark.tone, width: 18, height: 18 }} aria-hidden="true">
+              <Icon name={props.mark.icon} size={12} />
+            </span>
+          )}
           {props.label}
           {props.required && <b className="req"> 必須</b>}
           {props.hint && <span className="hint"> ・{props.hint}</span>}

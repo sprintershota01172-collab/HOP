@@ -335,7 +335,7 @@ describe('入力・保存・再計算', () => {
     }
     // 生活費の内訳 → お小遣いの行（ページ送り）→ 入力を開く
     let row = page.locator('.detail .ln:has-text("お小遣い")').first();
-    for (let i = 0; i < 8 && !(await row.count()); i++) {
+    for (let i = 0; i < 20 && !(await row.count()); i++) {
       await page.click('.detail .minipager button[aria-label="次のページ"]');
       await page.waitForTimeout(150);
     }
@@ -350,8 +350,12 @@ describe('入力・保存・再計算', () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
     await page.click('.legend button:has-text("生活費")');
+    while (await page.locator('.detail .minipager button[aria-label="前のページ"]:not([disabled])').count()) {
+      await page.click('.detail .minipager button[aria-label="前のページ"]');
+      await page.waitForTimeout(100);
+    }
     row = page.locator('.detail .ln:has-text("自由費")');
-    for (let i = 0; i < 8 && !(await row.count()); i++) {
+    for (let i = 0; i < 20 && !(await row.count()); i++) {
       await page.click('.detail .minipager button[aria-label="次のページ"]');
       await page.waitForTimeout(150);
     }

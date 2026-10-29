@@ -18,7 +18,7 @@ import { Switcher } from '../components/Switcher';
 import { pct, yen, ymText } from '../format';
 import { EVENT_ICONS, Icon, LIVING_ICONS } from '../icons';
 import { useStore } from '../store';
-import { LIVING_EMOJI } from '../emoji';
+import { LIVING_MARK, MARK } from '../emoji';
 
 export type SheetProps = { close: () => void; props: Record<string, unknown> };
 
@@ -160,8 +160,8 @@ export function SavingsSection() {
         {p.spouse && <MoneyField label={`${p.spouse.name || '配偶者'}の現金・預金`} required value={p.spouse.cash} onChange={(v) => up((pl) => void ((pl.spouse!.cash = v), (pl.baseYM = nowYM())))} />}
       </div>
       <div className="grid2">
-        <MoneyField label="🐷 毎月の貯金" hint="先取り" per="month" value={p.saving.monthly} placeholder="未設定" onChange={(v) => up((pl) => void (pl.saving = { ...pl.saving, monthly: v }))} />
-        <MoneyField label="🎁 ボーナス月の貯金" hint="1回あたり" value={p.saving.bonus} placeholder="未設定" onChange={(v) => up((pl) => void (pl.saving = { ...pl.saving, bonus: v }))} />
+        <MoneyField mark={MARK.saved} label="毎月の貯金" hint="先取り" per="month" value={p.saving.monthly} placeholder="未設定" onChange={(v) => up((pl) => void (pl.saving = { ...pl.saving, monthly: v }))} />
+        <MoneyField mark={MARK.gift} label="ボーナス月の貯金" hint="1回あたり" value={p.saving.bonus} placeholder="未設定" onChange={(v) => up((pl) => void (pl.saving = { ...pl.saving, bonus: v }))} />
       </div>
       <div className="micro">貯金は預金として現金に残ります（円グラフでは「貯蓄・投資」、残額は使えるお金）。NISAなどは「NISA・投資」に分けて入力します。基準: {ymText(p.baseYM)}</div>
       <div className="label" style={{ fontWeight: 700 }}>
@@ -390,7 +390,8 @@ export function CarLoanSection() {
     <>
       <div className="grid2">
         <MoneyField
-          label="🚗 自動車ローン"
+          mark={MARK.car}
+          label="自動車ローン"
           hint="毎月の返済"
           per="month"
           value={car ? car.monthly : null}
@@ -426,10 +427,10 @@ export function PocketSection() {
   return (
     <>
       <div className="grid2">
-        <MoneyField label={`👛 ${p.self.name || '本人'}のお小遣い`} per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
-        {p.spouse && <MoneyField label={`👛 ${p.spouse.name || '配偶者'}のお小遣い`} per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
+        <MoneyField mark={MARK.pocket} label={`${p.self.name || '本人'}のお小遣い`} per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
+        {p.spouse && <MoneyField mark={MARK.pocket} label={`${p.spouse.name || '配偶者'}のお小遣い`} per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
       </div>
-      <MoneyField label="🎡 自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
+      <MoneyField mark={MARK.free} label="自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
       <div className="card flat row between">
         <span className="label">お小遣い・自由費の合計</span>
         <b className="num">月{yen(total)}</b>
@@ -474,9 +475,9 @@ function LivingBase() {
     <>
       <div className="grid2">
         {LIVING_STD.map((d) => (
-          <MoneyField key={d.std} label={`${LIVING_EMOJI[d.std]} ${d.name}`} per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
+          <MoneyField key={d.std} mark={LIVING_MARK[d.std]} label={d.name} per="month" value={findStd(items, d.std)?.monthly ?? null} placeholder="未入力" onChange={(v) => setStd(d.std, v)} />
         ))}
-        <MoneyField label="🧺 その他の生活費" hint="まとめて" per="month" value={lump ? lump.monthly : null} placeholder="未入力" onChange={setLump} />
+        <MoneyField mark={LIVING_MARK.other} label="その他の生活費" hint="まとめて" per="month" value={lump ? lump.monthly : null} placeholder="未入力" onChange={setLump} />
       </div>
       <button className="item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'livingItems' })}>
         <span className="ic">
