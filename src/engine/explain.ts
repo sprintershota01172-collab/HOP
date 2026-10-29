@@ -78,6 +78,45 @@ export function limitText(r: Resolved, f: Fail): Limit {
 
 const sumRows = (rows: MonthRow[], f: (x: MonthRow) => number) => rows.reduce((s, x) => s + f(x), 0);
 
+/** 期間の月平均で、収入と住宅ローン以外のお金の流れを行にする（内訳の共通部分） */
+function flowLines(win: MonthRow[], per: (v: number) => number): { lines: BreakLine[]; eduOnce: number } {
+  const salary = sumRows(win, (x) => x.salary + x.benefit);
+  const bonus = sumRows(win, (x) => x.bonus);
+  const pension = sumRows(win, (x) => x.pension);
+  const allowance = sumRows(win, (x) => x.allowance);
+  const other = sumRows(win, (x) => x.otherIncome + x.retireBonus + x.deduction + x.gift);
+  const income = salary + bonus + pension + allowance + other;
+  const living = sumRows(win, (x) => x.living);
+  const edu = sumRows(win, (x) => x.education);
+  const eduOnce = sumRows(win, (x) => x.educationOnce);
+  const ins = sumRows(win, (x) => x.insurance);
+  const debt = sumRows(win, (x) => x.debt);
+  const events = sumRows(win, (x) => x.otherExpense + x.housingOnce);
+  const upkeep = sumRows(win, (x) => x.upkeep);
+  const rent = sumRows(win, (x) => x.rent);
+  const invest = sumRows(win, (x) => x.contrib - x.withdraw - x.autoWithdraw + x.invTax);
+
+  const lines: BreakLine[] = [];
+  const subIncome = [
+    salary && `給与・給付 ${yenText(per(salary))}`,
+    bonus && `賞与 ${yenText(per(bonus))}`,
+    pension && `年金 ${yenText(per(pension))}`,
+    allowance && `児童手当 ${yenText(per(allowance))}`,
+    other && `その他 ${yenText(per(other))}`,
+  ].filter(Boolean).join('・');
+  lines.push({ key: 'income', label: '世帯の手取り収入', value: per(income), op: '+', sheet: 'income', sub: subIncome });
+  lines.push({ key: 'living', label: '生活費（子供の分を含む）', value: per(living), op: '−', sheet: 'living' });
+  if (edu) lines.push({ key: 'education', label: '教育費', value: per(edu), op: '−', sheet: 'children', sub: eduOnce ? `うち大学の入学費用 ${yenText(per(eduOnce))}` : undefined });
+  if (ins) lines.push({ key: 'insurance', label: '保険料', value: per(ins), op: '−', sheet: 'insurance' });
+  if (debt) lines.push({ key: 'debt', label: 'いまある借入の返済', value: per(debt), op: '−', sheet: 'savings' });
+  if (events) lines.push({ key: 'events', label: '一時的な支出（車・イベント）', value: per(events), op: '−', sheet: 'events' });
+  lines.push({ key: 'upkeep', label: '住宅維持費（税・保険・修繕）', value: per(upkeep), op: '−', sheet: 'housing' });
+  if (rent) lines.push({ key: 'rent', label: '家賃（引越しまでの重複）', value: per(rent), op: '−', sheet: 'housing' });
+  if (invest) lines.push({ key: 'invest', label: invest > 0 ? 'NISAなどの積立' : '投資の取り崩し', value: per(Math.abs(invest)), op: invest > 0 ? '−' : '+', sheet: 'invest' });
+
+  return { lines, eduOnce };
+}
+
 export function breakdown(rec: Recommendation): Breakdown | null {
   const ctx = rec.ctx;
   const tiers = rec.tiers;
@@ -97,42 +136,10 @@ export function breakdown(rec: Recommendation): Breakdown | null {
   const win = base.rows.slice(p + 1, p + 1 + W);
   const per = (v: number) => (W > 0 ? v / W : 0);
 
-  const salary = sumRows(win, (x) => x.salary + x.benefit);
-  const bonus = sumRows(win, (x) => x.bonus);
-  const pension = sumRows(win, (x) => x.pension);
-  const allowance = sumRows(win, (x) => x.allowance);
-  const other = sumRows(win, (x) => x.otherIncome + x.retireBonus + x.deduction + x.gift);
-  const income = salary + bonus + pension + allowance + other;
-  const living = sumRows(win, (x) => x.living);
-  const edu = sumRows(win, (x) => x.education);
-  const eduOnce = sumRows(win, (x) => x.educationOnce);
-  const ins = sumRows(win, (x) => x.insurance);
-  const debt = sumRows(win, (x) => x.debt);
-  const events = sumRows(win, (x) => x.otherExpense + x.housingOnce);
-  const upkeep = sumRows(win, (x) => x.upkeep);
-  const rent = sumRows(win, (x) => x.rent);
-  const invest = sumRows(win, (x) => x.contrib - x.withdraw - x.autoWithdraw + x.invTax);
   const pay = sumRows(win, (x) => x.loanPayment);
   const cashStart = base.rows[p].cash;
   const cashEnd = W > 0 ? base.rows[p + W].cash : cashStart;
-
-  const lines: BreakLine[] = [];
-  const subIncome = [
-    salary && `給与・給付 ${yenText(per(salary))}`,
-    bonus && `賞与 ${yenText(per(bonus))}`,
-    pension && `年金 ${yenText(per(pension))}`,
-    allowance && `児童手当 ${yenText(per(allowance))}`,
-    other && `その他 ${yenText(per(other))}`,
-  ].filter(Boolean).join('・');
-  lines.push({ key: 'income', label: '世帯の手取り収入', value: per(income), op: '+', sheet: 'income', sub: subIncome });
-  lines.push({ key: 'living', label: '生活費（子供の分を含む）', value: per(living), op: '−', sheet: 'living' });
-  if (edu) lines.push({ key: 'education', label: '教育費', value: per(edu), op: '−', sheet: 'children', sub: eduOnce ? `うち大学の入学費用 ${yenText(per(eduOnce))}` : undefined });
-  if (ins) lines.push({ key: 'insurance', label: '保険料', value: per(ins), op: '−', sheet: 'insurance' });
-  if (debt) lines.push({ key: 'debt', label: 'いまある借入の返済', value: per(debt), op: '−', sheet: 'savings' });
-  if (events) lines.push({ key: 'events', label: '一時的な支出（車・イベント）', value: per(events), op: '−', sheet: 'events' });
-  lines.push({ key: 'upkeep', label: '住宅維持費（税・保険・修繕）', value: per(upkeep), op: '−', sheet: 'housing' });
-  if (rent) lines.push({ key: 'rent', label: '家賃（引越しまでの重複）', value: per(rent), op: '−', sheet: 'housing' });
-  if (invest) lines.push({ key: 'invest', label: invest > 0 ? 'NISAなどの積立' : '投資の取り崩し', value: per(Math.abs(invest)), op: invest > 0 ? '−' : '+', sheet: 'invest' });
+  const { lines } = flowLines(win, per);
 
   const change = cashEnd - cashStart;
   if (endKind === 'reserve' || endKind === 'short' || endKind === 'depleted' || endKind === 'goal') {
@@ -209,6 +216,35 @@ export function breakdown(rec: Recommendation): Breakdown | null {
   };
 }
 
+/* ---------------- 目指す予算で買った後の家計 ---------------- */
+
+export interface AfterPurchase {
+  months: number;
+  from: YM;
+  to: YM;
+  /** 収入 − 支出 − 積立 − 住宅ローンの返済（月平均）。合計 = surplus */
+  lines: BreakLine[];
+  /** 毎月の余裕（現金の増え方の月平均） */
+  surplus: Yen;
+  payment: Yen;
+}
+
+/** 実際に目指す予算（③）で購入した場合の、購入後5年の家計の月平均 */
+export function afterPurchase(rec: Recommendation): AfterPurchase | null {
+  const sim = rec.sim;
+  if (!rec.ctx || !sim || sim.pIndex < 0) return null;
+  const p = sim.pIndex;
+  const W = Math.max(0, Math.min(60, sim.rows.length - 1 - p));
+  if (W === 0) return null;
+  const win = sim.rows.slice(p + 1, p + 1 + W);
+  const per = (v: number) => v / W;
+  const { lines } = flowLines(win, per);
+  const pay = per(sumRows(win, (x) => x.loanPayment));
+  lines.push({ key: 'loan', label: '住宅ローンの返済', value: pay, op: '−', sheet: 'loanTerms' });
+  const surplus = per(sim.rows[p + W].cash - sim.rows[p].cash);
+  return { months: W, from: sim.rows[p + 1].ym, to: sim.rows[p + W].ym, lines, surplus, payment: pay };
+}
+
 /* ---------------- シナリオ検証 ---------------- */
 
 export interface ScenarioCheck {
@@ -247,9 +283,10 @@ export function withLongerLeave(plan: Plan): Plan | null {
 
 export function scenarioChecks(rec: Recommendation): ScenarioCheck[] {
   const ctx = rec.ctx;
-  if (!ctx || !rec.stdSim || !rec.stdSim.purchase) return [];
+  // 実際に目指す予算（審査の目安で抑えた場合はその額）で購入した場合を確かめる
+  const purchase = rec.sim?.purchase ?? rec.stdSim?.purchase;
+  if (!ctx || !purchase) return [];
   const r = ctx.r;
-  const purchase = rec.stdSim.purchase;
   const sc = ctx.sc;
   const run = (key: string, label: string, rr: Resolved, s: Scenario): ScenarioCheck => {
     const sim = simulate(rr, purchase, s);

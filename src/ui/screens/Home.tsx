@@ -8,6 +8,7 @@ import { useStore } from '../store';
 import { startNewHouse } from '../sheets/house';
 import { emptyData } from '../../engine/defaults';
 import { nowYM } from '../../engine/ym';
+import type { ViewModel } from '../../engine/view';
 
 export function SampleBanner() {
   const s = useStore();
@@ -83,42 +84,36 @@ export function Home() {
         {t.standard.ok ? (
           <>
             <Amount v={f.total} />
-            <button className="flowline" onClick={() => s.open({ kind: 'basis', props: { page: 'lines' } })} aria-label="返済余力の内訳を見る">
+            <button className="flowline" onClick={() => s.open({ kind: 'basis', props: { page: 'flow' } })} aria-label="予算の内訳を見る">
               <span>
-                ① 毎月 <b className="num">{yen(r.payment)}</b>
+                借入 <b className="num">{yen(f.loan)}</b>
+                <small>（毎月 {yen(f.payment)}）</small>
               </span>
-              <span className="arr">→</span>
               <span>
-                ② 借入 <b className="num">{yen(r.loan)}</b>
+                ＋ 自己資金 <b className="num">{yen(f.down)}</b>
               </span>
-              {r.overBank ? (
-                <>
-                  <span className="arr">→</span>
-                  <span>
-                    ③ 家計上 <b className="num">{yen(r.total)}</b>
-                  </span>
-                </>
-              ) : (
-                <span>
-                  ＋ 自己資金 <b className="num">{yen(r.down)}</b>
-                </span>
-              )}
             </button>
             {r.overBank ? (
-              <button className="chip tier-caution" style={{ alignSelf: 'flex-start' }} onClick={() => s.open({ kind: 'basis', props: { page: 'flow' } })}>
-                審査の目安 {yen(vm.bank!.amount)} が上限（家計上は ③ まで返せます）
+              <button className="chip tier-caution" style={{ alignSelf: 'flex-start' }} onClick={() => s.open({ kind: 'basis', props: { page: 'limit' } })}>
+                借入の上限は審査の目安で決まります（家計には余裕あり）
               </button>
             ) : (
               <div className="micro hide-tiny">
                 物件 {yen(f.price)} ＋ 諸費用 {yen(f.total - f.price)}（{s.computing ? '再計算中…' : '標準の条件で算出'}）
               </div>
             )}
-            <Ruler safe={t.safe.ok ? t.safe.total : 0} standard={t.standard.total} caution={t.caution.ok ? t.caution.total : t.standard.total} mark={f.total} desired={null} />
+            <Ruler
+              safe={t.safe.ok ? t.safe.total : 0}
+              standard={t.standard.total}
+              caution={t.caution.ok ? t.caution.total : t.standard.total}
+              mark={f.total}
+              desired={null}
+              cap={r.overBank ? f.total : null}
+            />
             <div className="row hide-tiny" style={{ gap: 10, flexWrap: 'wrap' }}>
-              <Legend color="var(--green)" text="安心" />
-              <Legend color="var(--green-2)" text="標準" />
-              <Legend color="var(--warn)" text="注意" />
-              <Legend color="var(--red-soft)" text="危険" />
+              {(r.overBank ? rulerLegend(t, f.total) : RULER_ALL).map((k) => (
+                <Legend key={k} color={LEGEND[k].color} text={LEGEND[k].text} />
+              ))}
             </div>
           </>
         ) : (
@@ -135,7 +130,7 @@ export function Home() {
 
       {m && (
         <div className="card kpis">
-          <Kpi label="借入額" v={f.loan} sub={`自己資金 ${yen(f.down)}`} />
+          <Kpi label="総返済額" v={m.totalPayment} sub={`うち利息 ${yen(m.totalInterest)}`} />
           <Kpi label="毎月の住宅関連支出" v={m.monthlyHousing} sub={`うち返済 ${yen(m.loanMonthly)}`} />
           <Kpi label="購入後の生活余力（月）" v={m.surplus5y} sign sub="購入後5年の平均" />
           <Kpi label="貯蓄（現金＋投資）" v={m.savingsNow} sub={<>10年後 {yen(m.savings10y)}</>} />
@@ -191,6 +186,26 @@ export function Home() {
       </div>
     </div>
   );
+}
+
+type LegendKey = 'safe' | 'standard' | 'caution' | 'danger' | 'over';
+const LEGEND: Record<LegendKey, { color: string; text: string }> = {
+  safe: { color: 'var(--green)', text: '安心' },
+  standard: { color: 'var(--green-2)', text: '標準' },
+  caution: { color: 'var(--warn)', text: '注意' },
+  danger: { color: 'var(--red-soft)', text: '危険' },
+  over: { color: 'var(--line)', text: '審査の目安を超える' },
+};
+const RULER_ALL: LegendKey[] = ['safe', 'standard', 'caution', 'danger'];
+/** 審査の目安で頭打ちのとき、ものさしに見えている範囲だけを凡例に出す */
+function rulerLegend(t: NonNullable<ViewModel['tiers']>, cap: number): LegendKey[] {
+  const out: LegendKey[] = [];
+  const safe = t.safe.ok ? t.safe.total : 0;
+  if (safe > 0) out.push('safe');
+  if (safe < cap) out.push('standard');
+  if (t.standard.total < cap) out.push('caution');
+  out.push('over');
+  return out;
 }
 
 function Amount({ v }: { v: number }) {

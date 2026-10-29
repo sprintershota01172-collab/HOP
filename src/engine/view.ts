@@ -3,7 +3,7 @@
  * Web Worker 内でも、メインスレッドでも同じ関数を使う。
  */
 import { monthPie, type PieSlice, type YearRow } from './aggregate';
-import { breakdown, levers, scenarioChecks, type Breakdown, type Lever, type ScenarioCheck } from './explain';
+import { afterPurchase, breakdown, levers, scenarioChecks, type AfterPurchase, type Breakdown, type Lever, type ScenarioCheck } from './explain';
 import { goalStatus, type GoalStatus } from './goals';
 import type { HouseEval } from './houses';
 import { computeAll, loanTrial, type Computed, type LoanWhatIf } from './index';
@@ -80,6 +80,8 @@ export interface ViewModel {
   };
   /** 計算の内訳（返済余力 → 借入目安 → 購入予算） */
   breakdown: Breakdown | null;
+  /** 目指す予算で買った後の家計（購入後5年の月平均） */
+  after: AfterPurchase | null;
   /** この予算で条件が変わった場合の検証 */
   checks: ScenarioCheck[];
   /** ローン画面の初期表示（推奨額・条件の変更なし） */
@@ -151,6 +153,7 @@ export function computeView(data: AppData): ViewModel {
       overBank: c.rec.overBank, final: c.rec.final, metrics: c.rec.metrics, schedule: c.rec.sim ? scheduleYears(c.rec.sim) : [],
     },
     breakdown: breakdown(c.rec),
+    after: afterPurchase(c.rec),
     checks: scenarioChecks(c.rec),
     loanBase: c.rec.ctx ? computeLoan({ loan: c.rec.final.loan, whatIf: { rateDelta: 0, incomeCut: 0, years: null } }) : null,
     houses,

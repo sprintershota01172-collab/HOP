@@ -193,17 +193,26 @@ export function short(v: number): string {
   return `${s}${a}`;
 }
 
-/** 予算のものさし（安心・標準・注意の範囲と、推奨額の位置） */
-export function Ruler({ safe, standard, caution, mark, desired }: { safe: number; standard: number; caution: number; mark: number; desired?: number | null }) {
-  const max = Math.max(caution, mark, desired ?? 0) * 1.18 || 1;
+/**
+ * 予算のものさし（安心・標準・注意の範囲と、推奨額の位置）。
+ * cap: 審査の目安で借りられる上限（その先は「審査の目安を超える」範囲として灰色で示し、家計上の上限までは伸ばさない）
+ */
+export function Ruler({ safe, standard, caution, mark, desired, cap }: { safe: number; standard: number; caution: number; mark: number; desired?: number | null; cap?: number | null }) {
+  const capped = cap != null && cap > 0 && cap < caution;
+  const max = (capped ? cap * 1.25 : Math.max(caution, mark, desired ?? 0) * 1.18) || 1;
+  const c = (v: number) => (capped ? Math.min(v, cap) : v);
   const pc = (v: number) => `${Math.max(0, Math.min(100, (v / max) * 100))}%`;
-  const seg = (a: number, b: number, color: string) => <i style={{ width: `${Math.max(0, ((b - a) / max) * 100)}%`, background: color }} />;
+  const seg = (a: number, b: number, color: string, cls?: string) => <i className={cls} style={{ width: `${Math.max(0, ((b - a) / max) * 100)}%`, background: color }} />;
+  const label = capped
+    ? `借りられる上限 ${yen(cap)}。その範囲は${safe >= cap ? 'すべて安心' : standard >= cap ? '安心と標準' : '安心〜注意'}`
+    : `安心 ${yen(safe)}まで、標準 ${yen(standard)}まで、注意 ${yen(caution)}まで`;
   return (
-    <div className="ruler" aria-label={`安心 ${yen(safe)}まで、標準 ${yen(standard)}まで、注意 ${yen(caution)}まで`}>
+    <div className="ruler" aria-label={label}>
       <div className="track">
-        {seg(0, safe, 'var(--green)')}
-        {seg(safe, standard, 'var(--green-2)')}
-        {seg(standard, caution, 'var(--warn)')}
+        {seg(0, c(safe), 'var(--green)')}
+        {seg(c(safe), c(standard), 'var(--green-2)')}
+        {seg(c(standard), c(caution), 'var(--warn)')}
+        {capped && seg(cap, max, '', 'over')}
       </div>
       <div className="ticks" />
       <div className="mark" style={{ left: pc(mark) }}>
@@ -215,9 +224,19 @@ export function Ruler({ safe, standard, caution, mark, desired }: { safe: number
         </div>
       )}
       <div className="lbls">
-        {safe > 0 && <span style={{ left: pc(safe) }}>{short(safe)}</span>}
-        {standard - safe > max * 0.14 && <span style={{ left: pc(standard) }}>{short(standard)}</span>}
-        {caution - standard > max * 0.12 && <span style={{ left: pc(caution) }}>{short(caution)}</span>}
+        {capped ? (
+          <>
+            {safe > 0 && safe < cap * 0.86 && <span style={{ left: pc(safe) }}>{short(safe)}</span>}
+            {standard > safe && standard < cap * 0.86 && standard - safe > max * 0.14 && <span style={{ left: pc(standard) }}>{short(standard)}</span>}
+            <span style={{ left: pc(cap) }}>上限 {short(cap)}</span>
+          </>
+        ) : (
+          <>
+            {safe > 0 && <span style={{ left: pc(safe) }}>{short(safe)}</span>}
+            {standard - safe > max * 0.14 && <span style={{ left: pc(standard) }}>{short(standard)}</span>}
+            {caution - standard > max * 0.12 && <span style={{ left: pc(caution) }}>{short(caution)}</span>}
+          </>
+        )}
       </div>
     </div>
   );

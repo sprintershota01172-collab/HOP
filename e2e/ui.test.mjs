@@ -292,7 +292,7 @@ describe('入力・保存・再計算', () => {
     const { ctx, page } = await open([390, 844]);
     await settle(page);
     const before = await heroText(page);
-    await page.click('button[aria-label="返済余力の内訳を見る"]');
+    await page.click('.hero button[aria-label="計算の内訳を見る"]');
     await page.waitForSelector('.sheet .wf .ln');
     await page.locator('.sheet .wf .ln:has-text("手取り収入")').first().click();
     await page.waitForTimeout(380);

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { uid } from '../src/engine/defaults';
-import { breakdown, levers, scenarioChecks } from '../src/engine/explain';
+import { afterPurchase, breakdown, levers, scenarioChecks } from '../src/engine/explain';
 import { computeAll } from '../src/engine/index';
 import { annuityPayment } from '../src/engine/loan';
 import { makeContext, tryLoan } from '../src/engine/recommend';
@@ -18,7 +18,7 @@ const pair = (o: Parameters<typeof household>[0] = {}) =>
     p.housing.loan.borrower = 'pair';
   });
 const std = (d: AppData) => computeAll(d).rec.tiers!.standard;
-const signed = (b: NonNullable<ReturnType<typeof breakdown>>) => b.lines.reduce((s, l) => s + (l.op === '+' ? l.value : -l.value), 0);
+const signed = (b: { lines: { op: string; value: number }[] }) => b.lines.reduce((s, l) => s + (l.op === '+' ? l.value : -l.value), 0);
 
 describe('通常のケース（共働き・子供1人）', () => {
   const d = pair({ children: 1 });
@@ -79,6 +79,35 @@ describe('通常のケース（共働き・子供1人）', () => {
     assert.ok(by('income').deltaLoan > 0, `income ${by('income').deltaLoan}`);
     assert.ok(by('gift').deltaTotal > 0, `gift ${by('gift').deltaTotal}`);
     assert.ok(lv.every((x) => x.sheet.length > 0), 'どの入力を開けばよいかが示される');
+  });
+});
+
+describe('借入が審査の目安で決まる（生活費が少なく、家計上はもっと返せる）', () => {
+  const d = withPlan(household({ net: 260_000, spouseNet: 250_000 }), (p) => {
+    p.living = [{ id: uid(), name: '生活費（まとめて）', icon: 'basket', monthly: 60_000, kind: 'variable', lump: true }];
+    p.housing.loan.borrower = 'self';
+  });
+  const rec = computeAll(d).rec;
+  it('目指す予算の借入 = 審査の目安、毎月の返済はその借入の返済額', () => {
+    assert.equal(rec.overBank, true);
+    assert.equal(rec.final.loan, rec.bank!.amount);
+    assert.ok(rec.final.payment < rec.payment, `${rec.final.payment} < ${rec.payment}`);
+    const t = rec.ctx!.terms;
+    const expected = annuityPayment(rec.final.loan * (1 - t.bonusShare), t.rate / 12, t.years * 12);
+    assert.ok(Math.abs(rec.final.payment - expected) <= 1);
+    assert.equal(rec.final.total, rec.final.loan + rec.final.down);
+  });
+  it('購入後の家計の内訳: 収入 − 支出 − 返済 の合計が、毎月の余裕（現金の増え方）と一致する', () => {
+    const a = afterPurchase(rec)!;
+    assert.equal(a.months, 60);
+    assert.ok(Math.abs(signed(a) - a.surplus) < 0.5, `${signed(a)} vs ${a.surplus}`);
+    assert.ok(Math.abs(a.payment - rec.final.payment) < 1, '返済は目指す予算の返済額');
+    assert.ok(a.surplus > 0);
+  });
+  it('条件の変化の検証は、目指す予算（審査の目安で抑えた借入）で行う', () => {
+    const base = scenarioChecks(rec).find((x) => x.key === 'base')!;
+    assert.equal(base.ok, true);
+    assert.equal(rec.sim!.purchase!.loan, rec.final.loan);
   });
 });
 

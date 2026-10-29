@@ -106,19 +106,28 @@ export function BasisSheet({ close, props }: SheetProps) {
 
 type Go = (sheet: string, page?: string) => void;
 
-/** 毎月の返済余力の内訳（各行をタップすると、その入力へ移動） */
+/**
+ * 毎月のお金の内訳（各行をタップすると、その入力へ移動）。
+ *  - 借入が家計の余力で決まる場合: 購入後、返済に回せる金額（＝①）の内訳
+ *  - 審査の目安で決まる場合: ③の予算で買った後の家計（返済後に残る毎月の余裕）
+ */
 function Lines({ vm, go }: { vm: ViewModel; go: Go }) {
   const b = vm.breakdown!;
+  const a = vm.after;
+  const bankMode = vm.rec.overBank && !!a;
+  const lines = bankMode ? a!.lines : b.lines;
   const fit = useFit<HTMLDivElement>(36, 3, 3);
-  const pg = usePages(b.lines, Math.max(3, fit.n));
-  const months = b.months;
+  const pg = usePages(lines, Math.max(3, fit.n));
+  const months = bankMode ? a!.months : b.months;
   const span = months >= 12 ? `${Math.floor(months / 12)}年${months % 12 ? `${months % 12}か月` : ''}` : `${months}か月`;
   return (
     <>
       <div className="micro" style={{ lineHeight: 1.5 }}>
-        {b.endKind === 'atPurchase'
-          ? '購入した時点で、手元に残すべき予備資金が足りません。'
-          : `購入から${ymText(b.to)}まで（${span}）の月平均。${b.endKind === 'loanEnd' ? 'ローン完済まで' : 'この時期'}の家計で、毎月の返済に使える金額です。`}
+        {bankMode
+          ? `③ の予算（借入 ${yen(vm.rec.final.loan)}）で買った後、購入から${span}の月平均です。`
+          : b.endKind === 'atPurchase'
+            ? '購入した時点で、手元に残すべき予備資金が足りません。'
+            : `購入から${ymText(b.to)}まで（${span}）の月平均。家計の中で、毎月ローンの返済に回せる金額です。`}
       </div>
       <div className="wf fill" ref={fit.ref}>
         {pg.slice.map((l) => (
@@ -137,46 +146,60 @@ function Lines({ vm, go }: { vm: ViewModel; go: Go }) {
       <div className="wf">
         <div className="total">
           <span className="op">=</span>
-          <span className="nm" style={{ fontWeight: 800 }}>毎月の返済余力（平均）</span>
-          <span className="v">{yen(b.payment)}</span>
+          <span className="nm" style={{ fontWeight: 800 }}>{bankMode ? '毎月の余裕（平均）' : '毎月の返済余力（平均）'}</span>
+          <span className="v">{yen(bankMode ? a!.surplus : b.payment)}</span>
           <span />
         </div>
       </div>
+      {bankMode && (
+        <div className="micro" style={{ lineHeight: 1.5 }}>
+          借入は審査の目安で決まっています。参考: 金利上昇・収入減への備えを残して返済に回せる最大は、毎月 {yen(b.payment)} です。
+        </div>
+      )}
     </>
   );
 }
 
-/** ① → ② → ③ の流れと、自己資金・審査の目安 */
+/** ① → ② → ③ の流れと、自己資金・審査の目安（実際に借りる額で説明する） */
 function Flow({ vm, go }: { vm: ViewModel; go: Go }) {
   const b = vm.breakdown!;
   const r = vm.rec;
+  const f = r.final;
+  const m = r.metrics;
   const d = b.downParts;
   const bank = vm.bank!;
   const pair = bank.pair;
+  const kept = Math.max(0, d.cashBefore + d.gift - d.moving - f.down);
   return (
     <>
       <FlowCards vm={vm} />
       <div className="card stack" style={{ gap: 6 }}>
         <div className="micro" style={{ lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--ink)' }}>② 借入目安</b> = ① 毎月 {yen(r.payment)}{r.paymentBonus ? `（ボーナス月 +${yen(r.paymentBonus)}）` : ''} を、金利 {pct(b.rate, 2)}・{b.years}年（{b.years * 12}回）で返せる元金。総返済 <span className="interest">{yen(b.totalPayment)}</span>、うち利息 <span className="interest">{yen(b.interest)}</span>。
+          <b style={{ color: 'var(--ink)' }}>① 毎月の返済</b> = 借入 {yen(f.loan)} を金利 {pct(b.rate, 2)}・{b.years}年（{b.years * 12}回）で返す額{f.paymentBonus ? `（ボーナス月 +${yen(f.paymentBonus)}）` : ''}。
+          {m && <>総返済 <span className="interest">{yen(m.totalPayment)}</span>、うち利息 <span className="interest">{yen(m.totalInterest)}</span>。</>}
         </div>
         <div className="micro" style={{ lineHeight: 1.6 }}>
-          <b style={{ color: 'var(--ink)' }}>③ 住宅購入予算</b> = ② {yen(b.loan)} ＋ 自己資金 {yen(b.down)} = 物件 {yen(b.price)} ＋ 諸費用 {yen(b.misc)}
+          <b style={{ color: 'var(--ink)' }}>② 借入額</b>
+          {r.overBank
+            ? ` は、金融機関の審査の目安 ${yen(bank.amount)} で決まっています。家計の余力からは、毎月 ${yen(r.payment)}・借入 ${yen(r.loan)} まで返せる計算です（参考）。`
+            : ` = 家計の中で毎月返済に回せる金額（${yen(r.payment)}）を、金利・返済期間で割り戻した額。審査の目安 ${yen(bank.amount)} の範囲内です。`}
+        </div>
+        <div className="micro" style={{ lineHeight: 1.6 }}>
+          <b style={{ color: 'var(--ink)' }}>③ 住宅購入予算</b> = ② {yen(f.loan)} ＋ 自己資金 {yen(f.down)} = 物件 {yen(f.price)} ＋ 諸費用 {yen(f.total - f.price)}
         </div>
         <button className="item" style={{ minHeight: 0 }} onClick={() => go('housing', 'plan')}>
           <div className="grow micro" style={{ lineHeight: 1.6 }}>
             <b style={{ color: 'var(--ink)' }}>自己資金</b>
-            {d.manual ? ' = 手入力の金額' : ` = 購入直前の現金 ${yen(d.cashBefore)}${d.gift ? ` ＋ 援助 ${yen(d.gift)}` : ''}${d.moving ? ` − 引越し等 ${yen(d.moving)}` : ''} − 手元に残す予備資金 ${yen(d.kept)}`}
+            {d.manual ? ' = 手入力の金額' : ` = 購入直前の現金 ${yen(d.cashBefore)}${d.gift ? ` ＋ 援助 ${yen(d.gift)}` : ''}${d.moving ? ` − 引越し等 ${yen(d.moving)}` : ''} − 手元に残す予備資金 ${yen(kept)}`}
           </div>
           <Icon name="right" size={16} />
         </button>
       </div>
-      <button className={`card item${r.overBank ? ' bad' : ''}`} style={{ border: r.overBank ? '1.5px solid var(--orange)' : undefined }} onClick={() => go('loanTerms', 'who')}>
+      <button className="card item" style={{ border: r.overBank ? '1.5px solid var(--orange)' : undefined }} onClick={() => go('loanTerms', 'who')}>
         <div className="grow">
-          <div className="t">金融機関の審査の目安（参考） {yen(bank.amount)}</div>
+          <div className="t">金融機関の審査の目安 {yen(bank.amount)}</div>
           <div className="micro" style={{ lineHeight: 1.5 }}>
-            {pair ? '夫婦の' : '本人の'}額面年収 {yen(bank.gross)} × {pct(bank.ratio, 0)}・審査金利 {pct(bank.rate, 1)}・{bank.years}年。
-            {r.overBank ? ` ②がこれを超えるため、実際に目指す予算は ${yen(r.final.total)}（借入 ${yen(r.final.loan)}）です。` : ' ②はこの範囲に収まっています。'}
+            {pair ? '夫婦の' : '本人の'}額面年収 {yen(bank.gross)} × {pct(bank.ratio, 0)}・審査金利 {pct(bank.rate, 1)}・{bank.years}年で計算。{pair ? '' : '夫婦で借りる場合はここで変更できます。'}
           </div>
         </div>
         <Icon name="right" size={16} />
@@ -185,23 +208,24 @@ function Flow({ vm, go }: { vm: ViewModel; go: Go }) {
   );
 }
 
+/** ① 毎月の返済 → ② 借入額 → ③ 購入予算（実際に目指す予算） */
 export function FlowCards({ vm }: { vm: ViewModel }) {
-  const r = vm.rec;
+  const f = vm.rec.final;
   return (
     <div className="flow">
       <div className="card flat">
-        <div className="label">① 月の返済余力</div>
-        <Money v={r.payment} />
+        <div className="label">① 毎月の返済</div>
+        <Money v={f.payment} />
       </div>
       <span className="arrow">→</span>
       <div className="card flat">
-        <div className="label">② 借入目安</div>
-        <Money v={r.loan} />
+        <div className="label">② 借入額</div>
+        <Money v={f.loan} />
       </div>
       <span className="arrow">→</span>
       <div className="card main-n">
         <div className="label">③ 購入予算</div>
-        <Money v={r.total} />
+        <Money v={f.total} />
       </div>
     </div>
   );
@@ -213,17 +237,17 @@ function LimitPage({ vm, levers, go }: { vm: ViewModel; levers: Lever[] | null; 
   const fit = useFit<HTMLDivElement>(38, 0, 2);
   return (
     <>
-      <div className="card stack" style={{ gap: 4 }}>
-        <div className="label" style={{ fontWeight: 700 }}>いちばん制限している要因</div>
-        <div style={{ fontSize: 'var(--fs-s)', lineHeight: 1.6 }}>
-          {b.limit ? (
-            <>1万円多く借りると、{b.limit.text}。</>
-          ) : (
-            'ローン完済まで、どの条件でも予備資金を保てます。'
-          )}
+      {vm.rec.overBank ? (
+        <BankLimitCard vm={vm} go={go} />
+      ) : (
+        <div className="card stack" style={{ gap: 4 }}>
+          <div className="label" style={{ fontWeight: 700 }}>いちばん制限している要因</div>
+          <div style={{ fontSize: 'var(--fs-s)', lineHeight: 1.6 }}>
+            {b.limit ? <>1万円多く借りると、{b.limit.text}。</> : 'ローン完済まで、どの条件でも予備資金を保てます。'}
+          </div>
         </div>
-        {vm.rec.overBank && <div className="micro neg">さらに、借入目安が金融機関の審査の目安を超えています。</div>}
-      </div>
+      )}
+      {vm.rec.overBank ? <BankLevers vm={vm} go={go} /> : <>
       <div className="label" style={{ fontWeight: 700 }}>
         この入力を変えると、予算がこれだけ変わります
       </div>
@@ -239,15 +263,59 @@ function LimitPage({ vm, levers, go }: { vm: ViewModel; levers: Lever[] | null; 
             ))}
       </div>
       <div className="micro">標準の条件（金利+1%・収入−10%のどちらでも予備資金と老後の資金を保てる）で、住宅購入予算を計算し直した差です。</div>
+      </>}
     </>
   );
 }
 
-/** この予算（②）で、条件が変わった場合 */
+/** 借入額が審査の目安で決まっている場合の説明 */
+function BankLimitCard({ vm, go }: { vm: ViewModel; go: Go }) {
+  const bank = vm.bank!;
+  return (
+    <button className="card stack" style={{ gap: 4, textAlign: 'left' }} onClick={() => go('loanTerms', 'who')}>
+      <div className="label" style={{ fontWeight: 700 }}>いちばん制限している要因</div>
+      <div style={{ fontSize: 'var(--fs-s)', lineHeight: 1.6 }}>
+        金融機関の審査の目安です。{bank.pair ? '夫婦' : '本人'}の額面年収 {yen(bank.gross)} から、借入は {yen(bank.amount)} までと見込んでいます。家計の余力ではありません。
+      </div>
+    </button>
+  );
+}
+
+/** 審査の目安で決まる場合に、予算を増やす方法 */
+function BankLevers({ vm, go }: { vm: ViewModel; go: Go }) {
+  const s = useStore();
+  const bank = vm.bank!;
+  const rows: { key: string; label: string; sub: string; run: () => void }[] = [];
+  if (!bank.pair && s.data.plan.spouse) rows.push({ key: 'pair', label: '夫婦で借りる（収入合算・ペアローン）', sub: '配偶者の年収も審査の目安に入ります', run: () => go('loanTerms', 'who') });
+  rows.push({ key: 'gross', label: '額面年収を確かめる', sub: '源泉徴収票の「支払金額」（賞与込み）', run: () => go('income') });
+  rows.push({ key: 'down', label: '自己資金を増やす（援助など）', sub: '増やした分だけ予算が増えます', run: () => go('housing', 'plan') });
+  return (
+    <>
+      <div className="label" style={{ fontWeight: 700 }}>
+        予算を増やすには
+      </div>
+      <div className="fill">
+        {rows.map((x) => (
+          <button key={x.key} className="lever" onClick={x.run}>
+            <span className="stack" style={{ gap: 0, minWidth: 0 }}>
+              <span className="ellipsis">{x.label}</span>
+              <small className="micro ellipsis">{x.sub}</small>
+            </span>
+            <b />
+            <Icon name="right" />
+          </button>
+        ))}
+      </div>
+      <div className="micro">生活費などを減らしても、審査の目安は変わらないため予算は増えません（家計の余裕が増えます）。</div>
+    </>
+  );
+}
+
+/** 目指す予算（③）で購入した場合に、条件が変わったら */
 function Checks({ vm, months }: { vm: ViewModel; months: number }) {
   return (
     <>
-      <div className="micro">② の借入額で購入した場合に、生活費{months}か月分の予備資金と老後の資金を保てるか。</div>
+      <div className="micro">③ の予算（借入 {yen(vm.rec.final.loan)}）で購入した場合に、生活費{months}か月分の予備資金と老後の資金を保てるか。</div>
       <div className="stack fill" style={{ gap: 0 }}>
         {vm.checks.map((c) => (
           <div key={c.key} className="check-row">
