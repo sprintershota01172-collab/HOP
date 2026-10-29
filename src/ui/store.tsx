@@ -2,7 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { ReactNode } from 'react';
 import { emptyData, sampleData } from '../engine/defaults';
 import type { AppData } from '../engine/types';
-import { computeLoan, computeView, type LoanRequest, type LoanView, type ViewModel } from '../engine/view';
+import type { Lever } from '../engine/explain';
+import { computeLevers, computeLoan, computeView, type LoanRequest, type LoanView, type ViewModel } from '../engine/view';
 import { nowYM } from '../engine/ym';
 import { initStorage, loadData, saveData, type StorageKind } from '../storage/db';
 import { connectCloud, type Cloud } from '../storage/platform';
@@ -10,7 +11,7 @@ import { connectCloud, type Cloud } from '../storage/platform';
 declare const __WORKER_SRC__: string;
 
 /* ---------- 計算エンジン（Web Worker、使えなければメインスレッド） ---------- */
-type Req = { kind: 'view'; data: AppData } | { kind: 'loan'; req: LoanRequest };
+type Req = { kind: 'view'; data: AppData } | { kind: 'loan'; req: LoanRequest } | { kind: 'levers' };
 class Engine {
   private worker: Worker | null = null;
   private seq = 0;
@@ -45,7 +46,7 @@ class Engine {
     return new Promise((resolve, reject) => {
       setTimeout(() => {
         try {
-          resolve(msg.kind === 'view' ? computeView(msg.data) : computeLoan(msg.req));
+          resolve(msg.kind === 'view' ? computeView(msg.data) : msg.kind === 'loan' ? computeLoan(msg.req) : computeLevers());
         } catch (e) {
           reject(e);
         }
@@ -66,6 +67,10 @@ export type Tab = 'home' | 'fp' | 'compare' | 'loan' | 'memo';
 export interface SheetSpec {
   kind: string;
   props?: Record<string, unknown>;
+  /** 内部で付ける番号（表示の識別用） */
+  id?: number;
+  /** 閉じるアニメーション中 */
+  closing?: boolean;
 }
 export interface Toast {
   id: number;
@@ -86,6 +91,7 @@ export interface Store {
   storage: StorageKind;
   cloud: 'off' | 'on' | 'error' | 'too-big';
   loan: (req: LoanRequest) => Promise<LoanView | null>;
+  levers: () => Promise<Lever[]>;
   tab: Tab;
   setTab: (t: Tab) => void;
   viewYear: number | null;
@@ -93,6 +99,7 @@ export interface Store {
   sheets: SheetSpec[];
   open: (s: SheetSpec) => void;
   close: () => void;
+  closeAll: () => void;
   toast: Toast | null;
   notify: (text: string, action?: Toast['action']) => void;
 }
@@ -271,12 +278,29 @@ export function StoreProvider({ children }: { children?: ReactNode }) {
   }, []);
 
   const loan = useCallback((req: LoanRequest) => engine.call<LoanView | null>({ kind: 'loan', req }), [engine]);
-  const open = useCallback((s: SheetSpec) => setSheets((st) => [...st, s]), []);
-  const close = useCallback(() => setSheets((st) => st.slice(0, -1)), []);
+  const levers = useCallback(() => engine.call<Lever[]>({ kind: 'levers' }), [engine]);
+  const sheetSeq = useRef(1);
+  const open = useCallback((sp: SheetSpec) => setSheets((st) => [...st, { ...sp, id: sheetSeq.current++, closing: false }]), []);
+  // 閉じるときは下へ滑らせてから取り除く（連続で押した場合は、その下のシートを順に閉じる）
+  const close = useCallback(() => {
+    setSheets((st) => {
+      const i = st.map((x) => !x.closing).lastIndexOf(true);
+      if (i < 0) return st;
+      const id = st[i].id;
+      setTimeout(() => setSheets((cur) => cur.filter((x) => x.id !== id)), 240);
+      return st.map((x, j) => (j === i ? { ...x, closing: true } : x));
+    });
+  }, []);
+  const closeAll = useCallback(() => {
+    setSheets((st) => {
+      setTimeout(() => setSheets((cur) => cur.filter((x) => !x.closing)), 240);
+      return st.map((x) => ({ ...x, closing: true }));
+    });
+  }, []);
 
   const value: Store = {
     data, loaded, vm, computing, update, replace, undo, canUndo: undoStack.length > 0, saveState, storage, cloud: cloudState,
-    loan, tab, setTab, viewYear, setViewYear, sheets, open, close, toast, notify,
+    loan, levers, tab, setTab, viewYear, setViewYear, sheets, open, close, closeAll, toast, notify,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -58,11 +58,20 @@ export interface MonthRow {
   gift: Yen;
   // 支出
   living: Yen;
+  /** 住宅費の合計 = rent + upkeep + loanPayment */
   housing: Yen;
+  /** 家賃（購入前と移行期間） */
+  rent: Yen;
+  /** 住宅維持費（固定資産税・都市計画税・火災地震保険・修繕積立・管理費・駐車場） */
+  upkeep: Yen;
   housingOnce: Yen;
   loanPayment: Yen;
+  /** loanPayment のうちボーナス返済分 */
+  loanBonus: Yen;
   loanInterest: Yen;
   education: Yen;
+  /** education のうち一時的な費用（大学の入学費用） */
+  educationOnce: Yen;
   insurance: Yen;
   debt: Yen;
   otherExpense: Yen;
@@ -76,7 +85,7 @@ export interface MonthRow {
   cash: Yen;
   invest: Yen;
   loanBalance: Yen;
-  /** 毎月かかる支出（予備資金の基準） */
+  /** 毎月かかる支出（予備資金の基準）。入学費用・ボーナス返済などの一時的な支出は含めない */
   need: Yen;
 }
 
@@ -123,8 +132,8 @@ interface InvState {
 }
 
 /** 子供1人のその月の教育費と生活費加算（物価補正前の今の価値） */
-export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving']): { edu: Yen; living: Yen } {
-  if (m < c.birthYM) return { edu: 0, living: 0 };
+export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assumptions']['childLiving']): { edu: Yen; living: Yen; once: Yen } {
+  if (m < c.birthYM) return { edu: 0, living: 0, once: 0 };
   const g = gradeAt(c.birthYM, m);
   const univEnd = 12 + (c.univ === 'none' ? 0 : c.univYears);
   const customOutside = c.lessonsMonthly != null || c.jukuMonthly != null;
@@ -155,12 +164,13 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
     living = childLiving.univ;
   }
   if (g >= -2 && g <= univEnd) edu += c.otherAnnual / 12;
-  // 大学の入学費用（受験料・併願校納付金を含む）は高3の2月に計上
+  // 大学の入学費用（受験料・併願校納付金を含む）は高3の2月に計上（一時的な支出）
+  let once = 0;
   if (c.univ !== 'none') {
     const fy12 = elemStartFY(c.birthYM) + 11;
-    if (m === toYM(fy12 + 1, 2)) edu += EDU_UNIV[c.univ].entrance;
+    if (m === toYM(fy12 + 1, 2)) once = EDU_UNIV[c.univ].entrance;
   }
-  return { edu, living };
+  return { edu: edu + once, living, once };
 }
 
 /** 児童手当（月額） */
@@ -227,6 +237,7 @@ interface Pre {
   allowance: number[];
   living: number[];
   education: number[];
+  educationOnce: number[];
   insurance: number[];
   debt: number[];
   otherExpense: number[];
@@ -252,7 +263,7 @@ function prepare(r: Resolved, inflationDelta: number): Pre {
   const mk = () => new Array<number>(n).fill(0);
   const pre: Pre = {
     f: mk(), salary: mk(), benefit: mk(), bonus: mk(), pension: mk(), retireBonus: mk(), allowance: mk(),
-    living: mk(), education: mk(), insurance: mk(), debt: mk(), otherExpense: mk(), otherIncome: mk(),
+    living: mk(), education: mk(), educationOnce: mk(), insurance: mk(), debt: mk(), otherExpense: mk(), otherIncome: mk(),
   };
   const ratioHist = new Map<string, number[]>();
   for (const p of r.people) ratioHist.set(p.id, []);
@@ -291,13 +302,16 @@ function prepare(r: Resolved, inflationDelta: number): Pre {
     const retiredAll = m >= r.retireAllYM;
     let living = (retiredAll ? r.retireLiving : r.livingTotal) * f;
     let edu = 0;
+    let once = 0;
     for (const c of plan.children) {
       const cm = childMonth(c, m, a.childLiving);
-      edu += cm.edu * f;
+      edu += (cm.edu - cm.once) * f;
+      once += cm.once * f;
       living += cm.living * f;
     }
     pre.living[i] = Math.round(living);
-    pre.education[i] = Math.round(edu);
+    pre.educationOnce[i] = Math.round(once);
+    pre.education[i] = Math.round(edu) + pre.educationOnce[i];
 
     let ins = 0, insIn = 0;
     for (const x of plan.insurances) {
@@ -415,8 +429,8 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     const f = pre.f[i];
     const row: MonthRow = {
       ym: m, salary: 0, bonus: 0, benefit: 0, pension: 0, allowance: 0, otherIncome: 0, retireBonus: 0, deduction: 0, gift: 0,
-      living: 0, housing: 0, housingOnce: 0, loanPayment: 0, loanInterest: 0, education: 0, insurance: 0, debt: 0, otherExpense: 0,
-      contrib: 0, withdraw: 0, autoWithdraw: 0, gain: 0, invTax: 0, cash: 0, invest: 0, loanBalance: 0, need: 0,
+      living: 0, housing: 0, rent: 0, upkeep: 0, housingOnce: 0, loanPayment: 0, loanBonus: 0, loanInterest: 0, education: 0, educationOnce: 0,
+      insurance: 0, debt: 0, otherExpense: 0, contrib: 0, withdraw: 0, autoWithdraw: 0, gain: 0, invTax: 0, cash: 0, invest: 0, loanBalance: 0, need: 0,
     };
     const incF = m >= pYM ? sc.incomeFactor : 1;
 
@@ -429,6 +443,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     row.allowance = pre.allowance[i];
     row.living = pre.living[i];
     row.education = pre.education[i];
+    row.educationOnce = pre.educationOnce[i];
     row.insurance = pre.insurance[i];
     row.debt = pre.debt[i];
     row.otherExpense = pre.otherExpense[i];
@@ -436,9 +451,9 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
     const retiredAll = m >= r.retireAllYM;
 
     // ---------- 住まい ----------
-    let housing = 0;
+    let upkeep = 0;
     const rentEnd = purchase ? purchase.ym + Math.max(0, hp.overlapMonths) : Infinity;
-    if (m < rentEnd) housing += r.rent;
+    if (m < rentEnd) row.rent = r.rent;
     if (purchase) {
       const hm = purchase.house;
       if (m === purchase.ym) {
@@ -454,12 +469,13 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
           );
         }
         const tax = taxByYear[yi];
-        housing += tax / 12 + hm.insuranceAnnual / 12 + hm.maintenanceMonthly * f + hm.parkingMonthly;
+        upkeep = tax / 12 + hm.insuranceAnnual / 12 + hm.maintenanceMonthly * f + hm.parkingMonthly;
       }
       if (schedule) {
         const k = m - purchase.ym;
         if (k >= 1 && k <= schedule.months) {
           row.loanPayment = schedule.monthly[k - 1] + schedule.bonus[k - 1];
+          row.loanBonus = schedule.bonus[k - 1];
           row.loanInterest = schedule.interest[k - 1];
           row.loanBalance = schedule.balance[k - 1];
         } else if (k < 1) {
@@ -468,9 +484,11 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario): 
       }
       row.deduction = deductionByMarch.get(m) ?? 0;
     }
-    row.housing = Math.round(housing) + row.loanPayment;
+    row.upkeep = Math.round(upkeep);
+    row.housing = row.rent + row.upkeep + row.loanPayment;
 
-    row.need = row.living + row.housing + row.education + row.insurance + row.debt;
+    // 予備資金の基準は「毎月かかる支出」。入学費用やボーナス月の返済のような一時的な支出で基準を跳ね上げない
+    row.need = row.living + (row.housing - row.loanBonus) + (row.education - row.educationOnce) + row.insurance + row.debt;
 
     // ---------- 投資（運用益 → 積立 → 計画どおりの取崩し） ----------
     let contrib = 0, withdraw = 0, gain = 0, invTax = 0;

@@ -162,18 +162,18 @@ export function HouseEditSheet({ close, props }: SheetProps) {
         <>
           <div className="micro">空欄は目安で計算します（固定資産税は価格から推計）。</div>
           <div className="grid2">
-            <MoneyField label="固定資産税など（年）" unit="yen" value={h.costs.propertyTaxAnnual} onChange={(v) => set((x) => void (x.costs.propertyTaxAnnual = v))} />
-            <MoneyField label="火災・地震保険（年）" unit="yen" value={h.costs.insuranceAnnual} onChange={(v) => set((x) => void (x.costs.insuranceAnnual = v))} />
+            <MoneyField label="固定資産税・都市計画税" per="year" value={h.costs.propertyTaxAnnual} onChange={(v) => set((x) => void (x.costs.propertyTaxAnnual = v))} />
+            <MoneyField label="火災・地震保険" per="year" value={h.costs.insuranceAnnual} onChange={(v) => set((x) => void (x.costs.insuranceAnnual = v))} />
           </div>
           {h.kind === 'mansion' ? (
             <div className="grid2">
-              <MoneyField label="管理費（月）" unit="yen" nullable={false} value={h.costs.mgmtMonthly} onChange={(v) => set((x) => void (x.costs.mgmtMonthly = v ?? 0))} />
-              <MoneyField label="修繕積立金（月）" unit="yen" nullable={false} value={h.costs.repairFundMonthly} onChange={(v) => set((x) => void (x.costs.repairFundMonthly = v ?? 0))} />
+              <MoneyField label="管理費" per="month" nullable={false} value={h.costs.mgmtMonthly} onChange={(v) => set((x) => void (x.costs.mgmtMonthly = v ?? 0))} />
+              <MoneyField label="修繕積立金" per="month" nullable={false} value={h.costs.repairFundMonthly} onChange={(v) => set((x) => void (x.costs.repairFundMonthly = v ?? 0))} />
             </div>
           ) : (
-            <MoneyField label="修繕費の積立（月）" unit="yen" value={h.costs.repairMonthly} onChange={(v) => set((x) => void (x.costs.repairMonthly = v))} />
+            <MoneyField label="修繕費の積立" per="month" value={h.costs.repairMonthly} onChange={(v) => set((x) => void (x.costs.repairMonthly = v))} />
           )}
-          <MoneyField label="駐車場（月）" unit="yen" nullable={false} value={h.costs.parkingMonthly} onChange={(v) => set((x) => void (x.costs.parkingMonthly = v ?? 0))} />
+          <MoneyField label="駐車場" per="month" nullable={false} value={h.costs.parkingMonthly} onChange={(v) => set((x) => void (x.costs.parkingMonthly = v ?? 0))} />
         </>
       )}
       {step === 6 && (

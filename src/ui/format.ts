@@ -1,3 +1,4 @@
+import { yenText } from '../engine/text';
 import { ymMonth, ymYear } from '../engine/ym';
 
 /**
@@ -6,21 +7,8 @@ import { ymMonth, ymYear } from '../engine/ym';
  */
 export function yen(v: number | null | undefined, opts: { sign?: boolean } = {}): string {
   if (v == null || !Number.isFinite(v)) return '—';
-  const neg = v < 0;
-  const a = Math.abs(Math.round(v));
-  let s: string;
-  if (a < 10_000) s = `${a.toLocaleString('ja-JP')}円`;
-  else if (a < 1_000_000) {
-    const man = Math.round(a / 1_000) / 10; // 0.1万円単位
-    s = `${man.toLocaleString('ja-JP', { maximumFractionDigits: 1 })}万円`;
-  } else if (a < 100_000_000) s = `${Math.round(a / 10_000).toLocaleString('ja-JP')}万円`;
-  else {
-    const oku = Math.floor(a / 100_000_000);
-    const man = Math.round((a % 100_000_000) / 10_000);
-    s = man === 0 ? `${oku}億円` : man === 10_000 ? `${oku + 1}億円` : `${oku}億${man.toLocaleString('ja-JP')}万円`;
-  }
-  if (neg) return `−${s}`;
-  return opts.sign && a > 0 ? `+${s}` : s;
+  const s = yenText(v);
+  return opts.sign && Math.round(v) > 0 ? `+${s}` : s;
 }
 
 /** 数字と単位を分けて返す（大きな数字の表示用） */

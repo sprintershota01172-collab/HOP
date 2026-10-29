@@ -36,9 +36,9 @@ export function TierChip({ tier, prefix }: { tier: Tier; prefix?: string }) {
 }
 
 export const TIER_NOTE: Record<Tier, string> = {
-  safe: '金利+2%・収入1割減でも、生活費6か月分の予備資金を保てる',
-  standard: '金利+1%でも、生活費3か月分の予備資金と老後の予備資金を保てる',
-  caution: '想定どおりなら破綻しないが、予備資金を取り崩す時期がある',
+  safe: '金利+2%と収入−10%が同時に起きても、生活費6か月分の予備資金を保てる',
+  standard: '金利+1%・収入−10%のどちらが起きても、生活費3か月分の予備資金と老後の資金を保てる',
+  caution: '想定どおりなら現金は尽きないが、予備資金を取り崩す時期がある',
   danger: '想定どおりでも、どこかで現金が足りなくなる',
 };
 
@@ -49,15 +49,15 @@ export function Diff({ v, invert, unit }: { v: number; invert?: boolean; unit?: 
   return <span className={`diff ${good ? 'pos' : 'neg'}`}>{text}</span>;
 }
 
-export const FAIL_TEXT = { reserve: '予備資金を下回ります', short: '現金が足りなくなります', depleted: '老後の資金が足りなくなります' } as const;
+export const FAIL_TEXT = { reserve: '予備資金を下回ります', short: '現金が足りなくなります', depleted: '老後の資金が足りなくなります', goal: '貯蓄目標に届きません' } as const;
 
 /** 段階の説明（予備資金の月数は設定に合わせる） */
 export function tierNote(tier: Tier, months: number): string {
   switch (tier) {
     case 'safe':
-      return `金利+2%・収入1割減でも、生活費${months * 2}か月分の予備資金を保てる`;
+      return `金利+2%と収入−10%が同時に起きても、生活費${months * 2}か月分の予備資金を保てる`;
     case 'standard':
-      return `金利+1%でも、生活費${months}か月分の予備資金と老後の予備資金を保てる`;
+      return `金利+1%・収入−10%のどちらでも、生活費${months}か月分の予備資金と老後の資金を保てる`;
     default:
       return TIER_NOTE[tier];
   }

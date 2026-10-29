@@ -5,6 +5,7 @@ import { Pager, useFit, usePages, useSwipe } from '../components/fields';
 import { yen } from '../format';
 import { Icon } from '../icons';
 import { useStore } from '../store';
+import { Switcher } from '../components/Switcher';
 import { startNewHouse } from '../sheets/house';
 import { Loading, SampleBanner } from './Home';
 
@@ -32,6 +33,7 @@ export function Compare() {
           追加
         </button>
       </div>
+      <Switcher k={mode} dir={mode === 'rank' ? 1 : -1}>
       {!vm ? (
         <Loading />
       ) : !vm.ready ? (
@@ -53,6 +55,7 @@ export function Compare() {
       ) : (
         <Ranking houses={[...vm.houses].sort((a, b) => a.rank - b.rank)} />
       )}
+      </Switcher>
     </div>
   );
 }

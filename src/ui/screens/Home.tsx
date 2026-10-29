@@ -64,58 +64,85 @@ export function Home() {
     );
   }
   const t = vm.tiers!;
-  const m = vm.rec.metrics;
+  const r = vm.rec;
+  const f = r.final;
+  const m = r.metrics;
   const ranked = vm.houses.filter((h) => !h.incomplete).sort((a, b) => a.rank - b.rank);
   return (
     <div className="screen">
       <SampleBanner />
-      <button className="card hero" style={{ border: 0, textAlign: 'left', width: '100%' }} onClick={() => s.open({ kind: 'basis' })} aria-label="推奨額の根拠を見る">
+      <div className="card hero">
         <RoofMark />
         <div className="row">
-          <span className="label">あなたの適正住宅予算</span>
-          <span className="chip" style={{ marginLeft: 'auto', position: 'relative' }}>
+          <span className="label">あなたの住宅購入予算</span>
+          <button className="chip" style={{ marginLeft: 'auto', position: 'relative' }} onClick={() => s.open({ kind: 'basis' })} aria-label="計算の内訳を見る">
             <Icon name="info" />
-            根拠・信頼度 {vm.confidence.level}
-          </span>
+            計算の内訳・信頼度 {vm.confidence.level}
+          </button>
         </div>
         {t.standard.ok ? (
           <>
-            <Amount v={vm.rec.total} />
-            <div className="micro">
-              物件 {yen(vm.rec.price)} ＋ 諸費用 {yen(vm.rec.total - vm.rec.price)}（{s.computing ? '再計算中…' : '標準の条件で算出'}）
-            </div>
-            <Ruler safe={t.safe.ok ? t.safe.total : 0} standard={t.standard.total} caution={t.caution.ok ? t.caution.total : t.standard.total} mark={vm.rec.total} desired={null} />
-            <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <Amount v={f.total} />
+            <button className="flowline" onClick={() => s.open({ kind: 'basis', props: { page: 'lines' } })} aria-label="返済余力の内訳を見る">
+              <span>
+                ① 毎月 <b className="num">{yen(r.payment)}</b>
+              </span>
+              <span className="arr">→</span>
+              <span>
+                ② 借入 <b className="num">{yen(r.loan)}</b>
+              </span>
+              {r.overBank ? (
+                <>
+                  <span className="arr">→</span>
+                  <span>
+                    ③ 家計上 <b className="num">{yen(r.total)}</b>
+                  </span>
+                </>
+              ) : (
+                <span>
+                  ＋ 自己資金 <b className="num">{yen(r.down)}</b>
+                </span>
+              )}
+            </button>
+            {r.overBank ? (
+              <button className="chip tier-caution" style={{ alignSelf: 'flex-start' }} onClick={() => s.open({ kind: 'basis', props: { page: 'flow' } })}>
+                審査の目安 {yen(vm.bank!.amount)} が上限（家計上は ③ まで返せます）
+              </button>
+            ) : (
+              <div className="micro hide-tiny">
+                物件 {yen(f.price)} ＋ 諸費用 {yen(f.total - f.price)}（{s.computing ? '再計算中…' : '標準の条件で算出'}）
+              </div>
+            )}
+            <Ruler safe={t.safe.ok ? t.safe.total : 0} standard={t.standard.total} caution={t.caution.ok ? t.caution.total : t.standard.total} mark={f.total} desired={null} />
+            <div className="row hide-tiny" style={{ gap: 10, flexWrap: 'wrap' }}>
               <Legend color="var(--green)" text="安心" />
               <Legend color="var(--green-2)" text="標準" />
               <Legend color="var(--warn)" text="注意" />
               <Legend color="var(--red-soft)" text="危険" />
-              {vm.rec.bankBinds && <span className="micro">審査の目安が上限</span>}
             </div>
           </>
         ) : (
-          <>
+          <button style={{ border: 0, background: 'transparent', padding: 0, textAlign: 'left' }} onClick={() => s.open({ kind: 'basis', props: { page: 'limit' } })}>
             <div className="hero-amount neg" style={{ fontSize: 'var(--fs-xl)', fontWeight: 800 }}>
-              {t.standard.zeroFail && t.standard.zeroFail.ym >= vm.retireAllYM ? '老後の資金が足りない計画です' : 'いまの計画では購入が難しい状態です'}
+              {t.standard.zeroFail && t.standard.zeroFail.ym >= vm.retireAllYM ? '老後の資金が足りない計画です' : '住宅費に充てられる金額がありません'}
             </div>
             <div className="micro" style={{ lineHeight: 1.6 }}>
-              {t.standard.zeroFail ? `${Math.floor(t.standard.zeroFail.ym / 12)}年ごろに資金が不足します（${t.standard.zeroFail.driver}）。` : ''}
-              収入・生活費・退職年齢・年金・積立を見直すと、予算を計算できます。タップで根拠を表示。
+              {vm.breakdown?.limit ? `${vm.breakdown.limit.text}。` : ''}どの入力を変えると良いかを、計算の内訳で確認できます。
             </div>
-          </>
+          </button>
         )}
-      </button>
+      </div>
 
       {m && (
         <div className="card kpis">
-          <Kpi label="推奨の借入額" v={vm.rec.loan} sub={`自己資金 ${yen(vm.rec.down)}`} />
+          <Kpi label="借入額" v={f.loan} sub={`自己資金 ${yen(f.down)}`} />
           <Kpi label="毎月の住宅関連支出" v={m.monthlyHousing} sub={`うち返済 ${yen(m.loanMonthly)}`} />
           <Kpi label="購入後の生活余力（月）" v={m.surplus5y} sign sub="購入後5年の平均" />
           <Kpi label="貯蓄（現金＋投資）" v={m.savingsNow} sub={<>10年後 {yen(m.savings10y)}</>} />
         </div>
       )}
 
-      <div className="card stack fill" style={{ gap: 6 }}>
+      <div className="card stack fill cands-card" style={{ gap: 6 }}>
         <div className="row between">
           <span className="label" style={{ fontWeight: 700 }}>
             候補の住宅{ranked.length > 0 && <span className="micro"> {ranked.length}件</span>}

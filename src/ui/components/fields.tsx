@@ -1,9 +1,14 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { normalize, parseMoney } from '../../engine/text';
 import { toYM, ymMonth, ymYear } from '../../engine/ym';
+
+export { parseMoney };
+import { yen } from '../format';
 import { Icon } from '../icons';
 
+
 const parseNum = (s: string): number | null => {
-  const t = s.replace(/[,，\s円万]/g, '').replace(/[０-９．]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0));
+  const t = normalize(s).replace(/[円万]/g, '');
   if (t === '' || t === '-' || t === '.') return null;
   const v = Number(t);
   return Number.isFinite(v) ? v : null;
@@ -19,38 +24,52 @@ function useDraft(value: number | null, toText: (v: number) => string) {
   return { text, setText, focused };
 }
 
+export type Per = 'month' | 'year' | 'once';
+const PER_UNIT: Record<Per, string> = { month: '万円/月', year: '万円/年', once: '万円' };
+const PER_SUFFIX: Record<Per, string> = { month: '/月', year: '/年', once: '' };
+/** これを超える値は単位の誤りの可能性が高い（警告のみ。値は入力どおり保存する） */
+const PER_MAX: Record<Per, number> = { month: 3_000_000, year: 50_000_000, once: 1_000_000_000 };
+const manText = (v: number) => String(Math.round((v / 10_000) * 10_000) / 10_000);
+
+/** 金額の入力。単位はすべて「万円」（月額は 万円/月、年額は 万円/年）。入力の解釈を円で表示する */
 export function MoneyField(props: {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
-  unit?: 'yen' | 'man';
+  per?: Per;
   hint?: string;
   nullable?: boolean;
   placeholder?: string;
   id?: string;
+  required?: boolean;
 }) {
-  const [unit, setUnit] = useState<'yen' | 'man'>(props.unit ?? 'man');
-  const k = unit === 'man' ? 10_000 : 1;
-  const fmt = (v: number) => (unit === 'man' ? String(Math.round((v / 10_000) * 10_000) / 10_000) : String(Math.round(v)));
-  const { text, setText, focused } = useDraft(props.value, fmt);
+  const per = props.per ?? 'once';
+  const { text, setText, focused } = useDraft(props.value, manText);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoId = useId();
   const id = props.id ?? autoId;
-  useEffect(() => {
-    setText(props.value == null ? '' : fmt(props.value));
-  }, [unit]);
   const commit = (s: string) => {
-    const n = parseNum(s);
-    const v = n == null ? (props.nullable === false ? 0 : null) : Math.round(n * k);
+    const n = parseMoney(s);
+    const v = n == null ? (props.nullable === false ? 0 : null) : n;
     if (v !== props.value) props.onChange(v);
   };
+  const live = text.trim() === '' ? null : parseMoney(text);
+  const warn = live != null && Math.abs(live) > PER_MAX[per];
   return (
     <label className="field" htmlFor={id}>
-      <span>
-        {props.label}
-        {props.hint && <span className="hint"> ・{props.hint}</span>}
+      <span className="row between" style={{ gap: 6 }}>
+        <span className="ellipsis">
+          {props.label}
+          {props.required && <b className="req"> 必須</b>}
+          {props.hint && <span className="hint"> ・{props.hint}</span>}
+        </span>
+        {live != null && (
+          <span className={`pv num${warn ? ' warn' : ''}`} aria-live="polite">
+            {warn ? '単位は万円です' : `${yen(live)}${PER_SUFFIX[per]}`}
+          </span>
+        )}
       </span>
-      <div className={`inp${props.value == null ? ' unset' : ''}`}>
+      <div className={`inp${props.value == null ? ' unset' : ''}${warn ? ' bad' : ''}`}>
         <input
           id={id}
           inputMode="decimal"
@@ -62,20 +81,19 @@ export function MoneyField(props: {
             focused.current = false;
             if (timer.current) clearTimeout(timer.current);
             commit((e.target as HTMLInputElement).value);
+            if (props.value != null || (e.target as HTMLInputElement).value) setText((e.target as HTMLInputElement).value.trim() === '' ? '' : manText(parseMoney((e.target as HTMLInputElement).value) ?? 0));
           }}
           onKeyDown={(e: KeyboardEvent) => {
             if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
           }}
           onInput={(e: Event) => {
-            const s = (e.target as HTMLInputElement).value;
-            setText(s);
+            const v = (e.target as HTMLInputElement).value;
+            setText(v);
             if (timer.current) clearTimeout(timer.current);
-            timer.current = setTimeout(() => commit(s), 700);
+            timer.current = setTimeout(() => commit(v), 700);
           }}
         />
-        <button type="button" className="unitbtn" onClick={() => setUnit(unit === 'man' ? 'yen' : 'man')} aria-label="単位を切り替える">
-          {unit === 'man' ? '万円' : '円'}
-        </button>
+        <span className="unit">{PER_UNIT[per]}</span>
       </div>
     </label>
   );
@@ -172,6 +190,7 @@ export function YMField(props: {
   to: number;
   hint?: string;
   nullable?: boolean;
+  required?: boolean;
 }) {
   const id = useId();
   const y = props.value != null ? ymYear(props.value) : '';
@@ -182,6 +201,7 @@ export function YMField(props: {
     <div className="field">
       <span>
         {props.label}
+        {props.required && <b className="req"> 必須</b>}
         {props.hint && <span className="hint"> ・{props.hint}</span>}
       </span>
       <div className={`inp${props.value == null ? ' unset' : ''}`}>
@@ -323,20 +343,26 @@ export function useSwipe(onLeft: () => void, onRight: () => void) {
   };
 }
 
-/** 要素の大きさ（グラフを実寸で描くため）。要素が後から現れても測れるようにコールバック ref を使う */
+/**
+ * 要素の大きさ（グラフ・一覧を実寸で描くため）。
+ * 要素が付いた時点（描画前）に測るので、画面切り替え直後にグラフや一覧が遅れて現れることがない。
+ */
 export function useSize<T extends Element>() {
-  const [el, setEl] = useState<T | null>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  useEffect(() => {
+  const ro = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((el: T | null) => {
+    ro.current?.disconnect();
+    ro.current = null;
     if (!el) return;
-    const ro = new ResizeObserver((es) => {
-      const r = es[0].contentRect;
-      setSize((s) => (s.w === Math.round(r.width) && s.h === Math.round(r.height) ? s : { w: Math.round(r.width), h: Math.round(r.height) }));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [el]);
-  return { ref: setEl as (el: T | null) => void, ...size };
+    const apply = (w: number, h: number) => setSize((s) => (s.w === Math.round(w) && s.h === Math.round(h) ? s : { w: Math.round(w), h: Math.round(h) }));
+    const r = el.getBoundingClientRect();
+    apply(r.width, r.height);
+    if (typeof ResizeObserver !== 'undefined') {
+      ro.current = new ResizeObserver((es) => apply(es[0].contentRect.width, es[0].contentRect.height));
+      ro.current.observe(el);
+    }
+  }, []);
+  return { ref, ...size };
 }
 
 /** 決まった高さの行が、いまの高さにいくつ入るか（スクロールさせずに件数で調整する） */

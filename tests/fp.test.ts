@@ -263,8 +263,9 @@ describe('推奨額', () => {
     assert.ok(t.safe.total <= t.standard.total && t.standard.total <= t.caution.total);
   });
 
-  it('推奨借入額は審査目安（①）を超えない', () => {
-    assert.ok(c.rec.loan <= c.rec.bank!.amount);
+  it('目指す予算の借入額は審査の目安を超えない（家計上の借入目安とは別に表示）', () => {
+    assert.ok(c.rec.final.loan <= c.rec.bank!.amount);
+    assert.ok(c.rec.final.loan <= c.rec.loan);
   });
 
   it('審査目安が不合理に小さくならない（世帯額面940万円・35年）', () => {
@@ -292,7 +293,7 @@ describe('推奨額', () => {
     assert.notEqual(recTotal(later), recTotal(d));
   });
 
-  it('貯蓄目標は判定だけで、推奨額を変えない（二重計上しない）', () => {
+  it('達成できる貯蓄目標は推奨額を変えない（支出として二重計上しない）', () => {
     const g = withPlan(d, (p) => {
       p.goals.push({ id: uid(), name: '旅行', target: 3_000_000, ym: toYM(2031, 10) });
     });

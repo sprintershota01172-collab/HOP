@@ -34,7 +34,7 @@ export function computeAll(data: AppData): Computed {
     } else if (h.fpBasis === 'desired' && h.desiredLoan != null) {
       sim = tryLoan(ctx, h.desiredLoan, 'standard', ctx.sc.base).sim;
       basis = '希望借入額で購入';
-    } else if (h.fpBasis !== 'none' && rec.sim) {
+    } else if (h.fpBasis !== 'none' && rec.sim && rec.tiers?.standard.ok) {
       sim = rec.sim;
       basis = '適正予算で購入';
     }

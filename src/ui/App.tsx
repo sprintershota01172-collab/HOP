@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useRef } from 'react';
+import { SheetState } from './components/Sheet';
+import { Switcher } from './components/Switcher';
 import type { ReactElement } from 'react';
 import { Icon } from './icons';
 import { Compare } from './screens/Compare';
@@ -35,11 +37,21 @@ const TABS: { t: Tab; label: string; icon: string; title: string }[] = [
 export function App() {
   const s = useStore();
   const cur = TABS.find((x) => x.t === s.tab)!;
+  // タブの並び順で、新しい画面が入ってくる向きを決める
+  const prev = useRef(s.tab);
+  const dirRef = useRef(1);
+  if (prev.current !== s.tab) {
+    dirRef.current = TABS.findIndex((x) => x.t === s.tab) >= TABS.findIndex((x) => x.t === prev.current) ? 1 : -1;
+    prev.current = s.tab;
+  }
+  const dir = dirRef.current;
   return (
     <div className="app">
       <header className="top">
         <h1>
-          {cur.title}
+          <span className="ttl" key={cur.t}>
+            {cur.title}
+          </span>
           {s.tab !== 'home' && <small>ほっぽさん</small>}
         </h1>
         <span className="save-dot" data-s={s.saveState} title={s.saveState === 'saved' ? '保存済み' : s.saveState === 'saving' ? '保存中' : '保存に失敗'} aria-label={s.saveState === 'saved' ? '保存済み' : '保存中'} />
@@ -51,8 +63,11 @@ export function App() {
         </button>
       </header>
       <main className="main">
-        {s.loaded &&
-          (s.tab === 'home' ? <Home key="home" /> : s.tab === 'fp' ? <FP key="fp" /> : s.tab === 'compare' ? <Compare key="compare" /> : s.tab === 'loan' ? <Loan key="loan" /> : <Memo key="memo" />)}
+        {s.loaded && (
+          <Switcher k={s.tab} dir={dir}>
+            {s.tab === 'home' ? <Home /> : s.tab === 'fp' ? <FP /> : s.tab === 'compare' ? <Compare /> : s.tab === 'loan' ? <Loan /> : <Memo />}
+          </Switcher>
+        )}
       </main>
       <nav className="nav" aria-label="画面の切り替え">
         {TABS.map((x) => (
@@ -62,9 +77,13 @@ export function App() {
           </button>
         ))}
       </nav>
-      {s.sheets.map((sh, i) => {
+      {s.sheets.map((sh) => {
         const C = SHEETS[sh.kind];
-        return C ? <C key={`${sh.kind}-${i}`} close={s.close} props={sh.props ?? {}} /> : null;
+        return C ? (
+          <SheetState.Provider key={sh.id} value={{ closing: !!sh.closing }}>
+            <C close={s.close} props={sh.props ?? {}} />
+          </SheetState.Provider>
+        ) : null;
       })}
       {s.toast && (
         <div className="toast" role="status">

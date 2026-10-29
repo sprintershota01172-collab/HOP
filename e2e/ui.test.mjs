@@ -34,17 +34,32 @@ const settle = (page) => page.waitForFunction(() => !document.querySelector('.he
 
 async function layoutReport(page) {
   return page.evaluate(() => {
-    const s = document.querySelector('.screen');
     const iw = innerWidth;
+    // 表示中の画面（切り替えの途中で残る前の画面は除く）
+    const live = (el) => !el.closest('.pane.out');
+    const scrollers = [...document.querySelectorAll('.main .screen, .main .pane')].filter(live);
+    const vOverflow = Math.max(0, ...scrollers.map((el) => el.scrollHeight - el.clientHeight));
     const wide = [...document.querySelectorAll('.app *')].filter((el) => {
+      if (!live(el)) return false;
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0 && r.right > iw + 0.5 && getComputedStyle(el).position !== 'fixed';
     }).map((el) => el.className || el.tagName);
     // 高さが足りずに中身が切れている部品（.fill は残りの高さに合わせて縮む領域）
-    const clipped = [...document.querySelectorAll('.screen .fill, .screen .card')]
+    const clipped = [...document.querySelectorAll('.main .fill, .main .card')]
+      .filter(live)
       .filter((el) => el.scrollHeight - el.clientHeight > 2)
       .map((el) => `${el.className}:${el.scrollHeight - el.clientHeight}`);
-    return { vOverflow: s.scrollHeight - s.clientHeight, docW: document.documentElement.scrollWidth, iw, wide: wide.slice(0, 5), clipped };
+    return { vOverflow, docW: document.documentElement.scrollWidth, iw, wide: wide.slice(0, 5), clipped };
+  });
+}
+
+/** シートの中身が収まっているか（中のページ切り替えも含めて） */
+async function sheetOverflow(page) {
+  return page.evaluate(() => {
+    const sheet = [...document.querySelectorAll('.sheet:not(.closing)')].pop();
+    if (!sheet) return 0;
+    const els = [sheet.querySelector('.sheet-body'), ...sheet.querySelectorAll('.pane:not(.out)')].filter(Boolean).filter((el) => !el.closest('.pane.out'));
+    return Math.max(0, ...els.map((el) => el.scrollHeight - el.clientHeight));
   });
 }
 
@@ -88,10 +103,10 @@ describe('スクロールなしのレイアウト', () => {
       await page.click(`.tile:has-text("${t}")`);
       await page.waitForSelector('.sheet-body');
       await page.waitForTimeout(300);
-      const o = await page.evaluate(() => { const b = [...document.querySelectorAll('.sheet-body')].pop(); return b.scrollHeight - b.clientHeight; });
+      const o = await sheetOverflow(page);
       assert.ok(o <= 1, `${t}: ${o}px はみ出し`);
-      await page.click('.sheet-head .iconbtn');
-      await page.waitForTimeout(120);
+      await page.click('.sheet:not(.closing) .sheet-head .iconbtn');
+      await page.waitForTimeout(320);
     }
     await ctx.close();
   });
@@ -200,35 +215,125 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
-  it('空の状態から「かんたん入力」で推奨予算が出る', async () => {
+  it('空の状態から「かんたん入力」で推奨予算が出て、入力した値が編集画面にそのまま出る', async () => {
     const { ctx, page } = await open([375, 667]);
     await page.click('button:has-text("自分の家計で始める")');
     await page.click('.sheet .btn.danger:has-text("消して入力する")');
-    await page.waitForSelector('text=かんたん入力');
-    const field = (label) => page.locator(`.sheet .field:has-text("${label}")`).first();
-    await field('あなたの生まれた年月').locator('select').first().selectOption('1995');
-    await page.click('.sheet-foot .btn.primary');
-    const inc = field('あなたの手取り月収').locator('input');
-    await inc.fill('35');
-    await inc.press('Enter');
-    await page.click('.sheet-foot .btn.primary');
-    const cash = field('あなたの現金・預金').locator('input');
-    await cash.fill('500');
-    await cash.press('Enter');
-    const liv = field('毎月の生活費').locator('input');
-    await liv.fill('15');
-    await liv.press('Enter');
-    const rent = field('いまの家賃').locator('input');
-    await rent.fill('70000');
-    await rent.press('Enter');
-    await page.click('.sheet-foot .btn.primary');
-    await field('家を買う時期').locator('select').first().selectOption(String(new Date().getFullYear() + 2));
-    await page.click('.seg button:has-text("なし")');
-    await page.click('.sheet-foot .btn.primary:has-text("結果を見る")');
+    await page.waitForSelector('.sheet h2:has-text("かんたん入力 1/")');
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    const field = (label) => sheet().locator(`.field:has-text("${label}"):not(.pane.out .field)`).first();
+    const money = async (label, v) => {
+      const inp = field(label).locator('input');
+      await inp.fill(v);
+      await inp.press('Enter');
+    };
+    const next = async () => {
+      await sheet().locator('.sheet-foot .btn.primary').click();
+      await page.waitForTimeout(380);
+    };
+    // 1 収入
+    await field('生まれた年月').locator('select').first().selectOption('1995');
+    await money('手取り月収', '35');
+    assert.match(await field('手取り月収').locator('.pv').textContent(), /35万円\/月/, '万円の入力が円で確認できる');
+    await next();
+    // 2 貯蓄
+    await money('現金・預金', '500');
+    await next();
+    // 3 生活費
+    await money('毎月の生活費', '15');
+    await next();
+    // 4 住まい・購入時期
+    await money('家賃', '7');
+    await sheet().locator('.seg button:has-text("購入計画")').click();
+    await page.waitForTimeout(380);
+    await field('購入の予定').locator('select').first().selectOption(String(new Date().getFullYear() + 2));
+    // 5〜8 は任意（そのまま進める）
+    for (let i = 0; i < 4; i++) await next();
+    assert.equal(await sheet().locator('.sheet-foot .btn.primary').textContent(), '結果を見る');
+    await sheet().locator('.sheet-foot .btn.primary').click();
     await page.waitForSelector('.hero .amount', { timeout: 20000 });
-    const t = await heroText(page);
-    assert.match(t, /\d/);
+    await settle(page);
+    assert.match(await heroText(page), /\d/);
     assert.equal(await page.locator('text=入力が必要です').count(), 0);
+
+    // あとから編集する画面に、同じ項目名・同じ単位で同じ値が出る
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    const checks = [
+      ['収入', '手取り月収', '35'],
+      ['貯蓄', '現金・預金', '500'],
+      ['生活費', '毎月の生活費', '15'],
+      ['住まい', '家賃', '7', 'いまの住まい'],
+    ];
+    for (const [tile, label, v, pg] of checks) {
+      await page.click(`.tile:has-text("${tile}")`);
+      await page.waitForTimeout(380);
+      if (pg) {
+        await sheet().locator(`.seg button:has-text("${pg}")`).click();
+        await page.waitForTimeout(380);
+      }
+      assert.equal(await field(label).locator('input').inputValue(), v, `${tile}: ${label}`);
+      await sheet().locator('.sheet-head .iconbtn').click();
+      await page.waitForTimeout(320);
+    }
+    // 再読み込み後も残っている
+    await page.waitForTimeout(800);
+    await page.reload();
+    await page.waitForSelector('.main .pane', { timeout: 20000 });
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("収入")');
+    await page.waitForTimeout(380);
+    assert.equal(await field('手取り月収').locator('input').inputValue(), '35');
+    await ctx.close();
+  });
+
+  it('計算の内訳から該当する入力を開いて変えると、その場で予算が変わる', async () => {
+    const { ctx, page } = await open([390, 844]);
+    await settle(page);
+    const before = await heroText(page);
+    await page.click('button[aria-label="返済余力の内訳を見る"]');
+    await page.waitForSelector('.sheet .wf .ln');
+    await page.locator('.sheet .wf .ln:has-text("手取り収入")').first().click();
+    await page.waitForTimeout(380);
+    const sheet = page.locator('.sheet:not(.closing)').last();
+    assert.equal(await sheet.locator('h2').textContent(), '収入');
+    const inp = sheet.locator('.pane:not(.out) .field:has-text("手取り月収") input').first();
+    const cur = Number(await inp.inputValue());
+    await inp.fill(String(cur + 5));
+    await inp.press('Enter');
+    // シート下の予算プレビューが、その場で増えた額を表示する
+    await page.waitForSelector('.sheet:not(.closing) .preview .diff.pos', { timeout: 15000 });
+    // Esc は一番上のシートだけを閉じる
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator('.sheet:not(.closing) h2').last().textContent(), '計算の内訳');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(350);
+    await settle(page);
+    assert.notEqual(await heroText(page), before, '収入を増やすと予算が変わる');
+    await ctx.close();
+  });
+
+  it('タブを素早く連打しても、最後に選んだ画面1枚だけが残る', async () => {
+    const { ctx, page } = await open([390, 844]);
+    for (const i of [2, 3, 4, 5, 1, 4, 2, 3]) await page.click(`nav button:nth-child(${i})`, { delay: 0 });
+    await page.waitForTimeout(600);
+    const panes = await page.$$eval('.main > .switcher > .pane', (els) => els.map((e) => e.dataset.pane));
+    assert.deepEqual(panes, ['in']);
+    assert.equal(await page.locator('nav button[aria-current="page"]').count(), 1);
+    assert.equal(await page.locator('nav button:nth-child(3)').getAttribute('aria-current'), 'page');
+    await ctx.close();
+  });
+
+  it('「視差効果を減らす」設定では横移動なしのフェードになる', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    await page.goto(srv.url);
+    await page.waitForSelector('.hero .amount', { timeout: 20000 });
+    await page.click('nav button:nth-child(2)');
+    const tf = await page.$eval('.main .pane', (e) => getComputedStyle(e).transform);
+    assert.ok(tf === 'none' || /matrix\(1, 0, 0, 1, 0, 0\)/.test(tf), `transform: ${tf}`);
     await ctx.close();
   });
 });

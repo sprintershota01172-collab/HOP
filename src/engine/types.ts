@@ -81,6 +81,8 @@ export interface LivingItem {
   icon: string;
   monthly: Yen;
   kind: 'fixed' | 'variable';
+  /** 「まとめて入力」で作った合計の項目（項目ごとの入力とは同時に使わない） */
+  lump?: boolean;
 }
 
 export type InsuranceKind = 'life' | 'medical' | 'cancer' | 'education' | 'annuity' | 'other';

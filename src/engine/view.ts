@@ -3,10 +3,11 @@
  * Web Worker 内でも、メインスレッドでも同じ関数を使う。
  */
 import { monthPie, type PieSlice, type YearRow } from './aggregate';
+import { breakdown, levers, scenarioChecks, type Breakdown, type Lever, type ScenarioCheck } from './explain';
 import { goalStatus, type GoalStatus } from './goals';
 import type { HouseEval } from './houses';
 import { computeAll, loanTrial, type Computed, type LoanWhatIf } from './index';
-import { tryLoan, type BankLimit, type Context, type Fail, type Metrics, type Tier, type TierKey, type TierResult } from './recommend';
+import { tryLoan, type BankLimit, type Budget, type Context, type Fail, type Metrics, type ScenarioKey, type Tier, type TierKey, type TierResult } from './recommend';
 import type { LoanSchedule } from './loan';
 import type { Assumed } from './resolve';
 import type { SimWarning } from './simulate';
@@ -73,7 +74,16 @@ export interface ViewModel {
   people: { id: string; name: string; birthYM: YM; retireYM: YM; pension: Yen; gross: Yen; net: Yen; bonus: Yen }[];
   tiers: Record<TierKey, TierResult> | null;
   bank: BankLimit | null;
-  rec: { loan: Yen; total: Yen; price: Yen; down: Yen; bankBinds: boolean; metrics: Metrics | null; schedule: ScheduleYear[] };
+  rec: {
+    payment: Yen; paymentBonus: Yen; loan: Yen; total: Yen; price: Yen; down: Yen; overBank: boolean; final: Budget;
+    metrics: Metrics | null; schedule: ScheduleYear[];
+  };
+  /** 計算の内訳（返済余力 → 借入目安 → 購入予算） */
+  breakdown: Breakdown | null;
+  /** この予算で条件が変わった場合の検証 */
+  checks: ScenarioCheck[];
+  /** ローン画面の初期表示（推奨額・条件の変更なし） */
+  loanBase: LoanView | null;
   houses: HouseView[];
   /** 自己資金の算出に使った値 */
   downInfo: { cashBefore: Yen; needWithRent: Yen; gift: Yen; moving: Yen } | null;
@@ -137,9 +147,12 @@ export function computeView(data: AppData): ViewModel {
     tiers: c.rec.tiers,
     bank: c.rec.bank,
     rec: {
-      loan: c.rec.loan, total: c.rec.total, price: c.rec.price, down: c.rec.down, bankBinds: c.rec.bankBinds, metrics: c.rec.metrics,
-      schedule: c.rec.sim ? scheduleYears(c.rec.sim) : [],
+      payment: c.rec.payment, paymentBonus: c.rec.paymentBonus, loan: c.rec.loan, total: c.rec.total, price: c.rec.price, down: c.rec.down,
+      overBank: c.rec.overBank, final: c.rec.final, metrics: c.rec.metrics, schedule: c.rec.sim ? scheduleYears(c.rec.sim) : [],
     },
+    breakdown: breakdown(c.rec),
+    checks: scenarioChecks(c.rec),
+    loanBase: c.rec.ctx ? computeLoan({ loan: c.rec.final.loan, whatIf: { rateDelta: 0, incomeCut: 0, years: null } }) : null,
     houses,
     downInfo: c.rec.ctx
       ? { cashBefore: c.rec.ctx.cashBefore, needWithRent: c.rec.ctx.needWithRent, gift: data.plan.housing.gift, moving: data.plan.housing.movingCost ?? 0 }
@@ -160,13 +173,13 @@ export function computeLoan(req: LoanRequest): LoanView | null {
   const ctx = lastCtx;
   if (!ctx || !lastComputed) return null;
   const { trial, metrics } = loanTrial(ctx, req.loan, req.whatIf, req.terms);
-  // 段階判定（同じ条件・同じ借入額で、各段階のストレスをかける）
-  const c2 = { ...ctx, terms: trial.purchase.terms };
+  // 段階判定（同じ借入額で、各段階の条件に「金利上昇・収入減」の試算を上乗せする）
+  const sc = Object.fromEntries(
+    (Object.keys(ctx.sc) as ScenarioKey[]).map((k) => [k, { ...ctx.sc[k], rateDelta: ctx.sc[k].rateDelta + req.whatIf.rateDelta, incomeFactor: ctx.sc[k].incomeFactor * (1 - req.whatIf.incomeCut) }]),
+  ) as Context['sc'];
+  const c2: Context = { ...ctx, terms: trial.purchase.terms, sc };
   const fails = {} as Record<TierKey, Fail | null>;
-  for (const k of ['safe', 'standard', 'caution'] as const) {
-    const sc = { ...ctx.sc[k], rateDelta: ctx.sc[k].rateDelta + req.whatIf.rateDelta, incomeFactor: ctx.sc[k].incomeFactor * (1 - req.whatIf.incomeCut) };
-    fails[k] = tryLoanFail(c2, req.loan, k, sc);
-  }
+  for (const k of ['safe', 'standard', 'caution'] as const) fails[k] = tryLoan(c2, req.loan, k).fail;
   const tier: Tier = !fails.safe ? 'safe' : !fails.standard ? 'standard' : !fails.caution ? 'caution' : 'danger';
   return {
     loan: trial.loan,
@@ -182,6 +195,7 @@ export function computeLoan(req: LoanRequest): LoanView | null {
   };
 }
 
-function tryLoanFail(ctx: Context, loan: Yen, tier: TierKey, sc: Context['sc']['base']): Fail | null {
-  return tryLoan(ctx, loan, tier, sc).fail;
+/** 感度分析（重いので、内訳を開いたときだけ計算する） */
+export function computeLevers(): Lever[] {
+  return lastComputed ? levers(lastComputed.rec) : [];
 }

@@ -4,6 +4,7 @@ import type { Resolved } from './resolve';
 import { incomeOf, simulate, spendOf, type HouseModel, type MonthRow, type Purchase, type Scenario, type SimResult } from './simulate';
 import { estimatePropertyTax } from './tax';
 import type { Assumptions, House, LoanTerms, Yen, YM } from './types';
+import { yenText } from './text';
 import { ageAt, ymYear } from './ym';
 
 export type TierKey = 'safe' | 'standard' | 'caution';
@@ -11,25 +12,49 @@ export type Tier = TierKey | 'danger';
 
 export const TIER_LABEL: Record<Tier, string> = { safe: '安心', standard: '標準', caution: '注意', danger: '危険' };
 
-/** 各段階のストレス条件 */
-export function scenarios(a: Assumptions): Record<TierKey | 'base', Scenario> {
+export type ScenarioKey = 'base' | 'rate1' | 'income10' | 'severe';
+
+/** 試算に使う条件（金利上昇は変動金利・固定期間後に5年かけて反映、収入減は購入後の給与・賞与・給付に反映） */
+export function scenarios(a: Assumptions): Record<ScenarioKey, Scenario> {
   return {
     base: { key: 'base', rateDelta: 0, incomeFactor: 1, inflationDelta: 0, returnRate: a.returnMid },
-    safe: { key: 'safe', rateDelta: 0.02, incomeFactor: 0.9, inflationDelta: 0, returnRate: a.returnLow },
-    standard: { key: 'standard', rateDelta: 0.01, incomeFactor: 1, inflationDelta: 0, returnRate: a.returnMid },
-    caution: { key: 'caution', rateDelta: 0, incomeFactor: 1, inflationDelta: 0, returnRate: a.returnMid },
+    rate1: { key: 'rate1', rateDelta: 0.01, incomeFactor: 1, inflationDelta: 0, returnRate: a.returnMid },
+    income10: { key: 'income10', rateDelta: 0, incomeFactor: 0.9, inflationDelta: 0, returnRate: a.returnMid },
+    severe: { key: 'severe', rateDelta: 0.02, incomeFactor: 0.9, inflationDelta: 0, returnRate: a.returnLow },
   };
 }
+
+export const SCENARIO_LABEL: Record<ScenarioKey, string> = {
+  base: '想定どおりの場合',
+  rate1: '金利が1%上がった場合',
+  income10: '購入後の収入が10%減った場合',
+  severe: '金利が2%上がり、収入も10%減った場合',
+};
+
+/**
+ * 段階ごとに、すべて満たす必要がある条件。
+ *  - 安心: 金利+2% と 収入−10% が同時に起きても、予備資金を2倍（初期6か月分）保てる
+ *  - 標準: 金利+1%、収入−10% のどちらが起きても、予備資金（初期3か月分）と老後の資金を保てる
+ *  - 注意: 想定どおりなら、現金が一度も0円を下回らない
+ */
+export const TIER_SCENARIOS: Record<TierKey, ScenarioKey[]> = {
+  safe: ['severe'],
+  standard: ['rate1', 'income10'],
+  caution: ['base'],
+};
+
 /** 予備資金の倍率（設定の「生活費◯か月分」に掛ける） */
 export const TIER_RESERVE: Record<TierKey, number> = { safe: 2, standard: 1, caution: 0 };
 
 export interface Fail {
   ym: YM;
-  /** reserve: 予備資金を下回る / short: 現役中に現金が尽きる / depleted: 老後の資金が尽きる */
-  kind: 'reserve' | 'short' | 'depleted';
+  /** reserve: 予備資金を下回る / short: 現役中に現金が尽きる / depleted: 老後の資金が尽きる / goal: 貯蓄目標に届かない */
+  kind: 'reserve' | 'short' | 'depleted' | 'goal';
   cash: Yen;
   floor: Yen;
   driver: string;
+  /** どの条件で崩れたか */
+  scenario?: ScenarioKey;
 }
 
 /** 失敗した年に何が増えた（減った）のかを特定する */
@@ -58,6 +83,7 @@ export const TIER_TERMINAL: Record<TierKey, boolean> = { safe: true, standard: t
  * 段階の条件を満たすか。満たさない場合は最初に崩れた月と原因を返す。
  *  - 購入〜退職: 現金 ≥ 毎月の支出 ×（予備資金の月数 × 段階の倍率）
  *  - 退職後: 現金 ≥ 0、かつ 現金＋投資 ≥ 老後の予備資金（介護費用の平均×人数、物価で増加）
+ *  - 貯蓄目標（安心・標準）: 目標の月の前月末に、現金＋投資 ≥ 目標額
  */
 export function checkTier(r: Resolved, sim: SimResult, tier: TierKey): Fail | null {
   const a = r.plan.assumptions;
@@ -66,6 +92,11 @@ export function checkTier(r: Resolved, sim: SimResult, tier: TierKey): Fail | nu
   const from = Math.max(0, sim.pIndex);
   const retireI = sim.retireIndex;
   const baseYear = ymYear(r.start);
+  const goals = TIER_TERMINAL[tier]
+    ? r.plan.goals
+        .map((g) => ({ g, i: g.ym - 1 - r.start }))
+        .filter((x) => x.i >= from && x.i < sim.rows.length && x.g.target > 0)
+    : [];
   for (let i = from; i < sim.rows.length; i++) {
     const row = sim.rows[i];
     if (i < retireI) {
@@ -75,6 +106,11 @@ export function checkTier(r: Resolved, sim: SimResult, tier: TierKey): Fail | nu
       const care = terminal * Math.pow(1 + a.inflation, ymYear(row.ym) - baseYear);
       if (row.cash < 0 || row.cash + row.invest < care) {
         return { ym: row.ym, kind: 'depleted', cash: row.cash + row.invest, floor: Math.round(care), driver: driverOf(sim, i) };
+      }
+    }
+    for (const x of goals) {
+      if (x.i === i && row.cash + row.invest < x.g.target) {
+        return { ym: row.ym, kind: 'goal', cash: row.cash + row.invest, floor: x.g.target, driver: `貯蓄目標「${x.g.name}」${yenText(x.g.target)}` };
       }
     }
   }
@@ -91,6 +127,8 @@ export function effectiveTerms(r: Resolved, terms: LoanTerms = r.plan.housing.lo
 
 export interface BankLimit {
   amount: Yen;
+  /** 夫婦の収入で計算したか */
+  pair: boolean;
   gross: Yen;
   ratio: number;
   years: number;
@@ -111,7 +149,7 @@ export function bankLimit(r: Resolved): BankLimit {
   const monthly = Math.max(0, (ratio * gross - debtAnnual) / 12);
   const rate = Math.max(t.screeningRate, t.rate);
   const amount = years > 0 ? Math.floor(principalFromPayment(monthly, rate / 12, years * 12) / 100_000) * 100_000 : 0;
-  return { amount, gross, ratio, years, rate, debtAnnual };
+  return { amount, pair: borrowers.length > 1, gross, ratio, years, rate, debtAnnual };
 }
 
 /** 予算（住宅取得総額）から仮の住宅を作る */
@@ -167,7 +205,7 @@ export function houseModel(r: Resolved, x: House): HouseModel {
 /** 購入しない場合の推移（自己資金の算出に使う） */
 export interface Context {
   r: Resolved;
-  sc: ReturnType<typeof scenarios>;
+  sc: Record<ScenarioKey, Scenario>;
   baseline: SimResult;
   cashBefore: Yen;
   needWithRent: Yen;
@@ -220,12 +258,31 @@ export interface Trial {
   total: Yen;
   house: HouseModel;
   purchase: Purchase;
+  /** 最初の条件での推移（崩れた場合は、崩れた条件での推移） */
   sim: SimResult;
   fail: Fail | null;
 }
 
+/** 段階のすべての条件で確かめる。崩れた条件があれば、最も早く崩れたものを返す */
+export function evaluate(ctx: Context, purchase: Purchase, tier: TierKey, scenario?: Scenario): { sim: SimResult; fail: Fail | null } {
+  const { r } = ctx;
+  if (scenario) {
+    const sim = simulate(r, purchase, scenario);
+    return { sim, fail: checkTier(r, sim, tier) };
+  }
+  let first: { sim: SimResult; fail: Fail | null } | null = null;
+  let worst: { sim: SimResult; fail: Fail } | null = null;
+  for (const key of TIER_SCENARIOS[tier]) {
+    const sim = simulate(r, purchase, ctx.sc[key]);
+    const f = checkTier(r, sim, tier);
+    if (!first) first = { sim, fail: null };
+    if (f && (!worst || f.ym < worst.fail.ym)) worst = { sim, fail: { ...f, scenario: key } };
+  }
+  return worst ?? first!;
+}
+
 /** 借入額を決めたときの購入（予算モデル）を試す */
-export function tryLoan(ctx: Context, loan: Yen, tier: TierKey, scenario: Scenario = ctx.sc[tier]): Trial {
+export function tryLoan(ctx: Context, loan: Yen, tier: TierKey, scenario?: Scenario): Trial {
   const { r } = ctx;
   // 自己資金は借入額に応じた住宅費で決まる（1回の見積で十分に収束する）
   const guess = budgetHouse(r, loan + Math.max(0, ctx.cashBefore));
@@ -233,12 +290,12 @@ export function tryLoan(ctx: Context, loan: Yen, tier: TierKey, scenario: Scenar
   const total = loan + info.down;
   const house = budgetHouse(r, total);
   const purchase: Purchase = { house, loan, down: info.down, ym: r.purchaseYM, terms: ctx.terms };
-  const sim = simulate(r, purchase, scenario);
-  return { loan, down: info.down, total, house, purchase, sim, fail: checkTier(r, sim, tier) };
+  const ev = evaluate(ctx, purchase, tier, scenario);
+  return { loan, down: info.down, total, house, purchase, sim: ev.sim, fail: ev.fail };
 }
 
 /** 決まった住宅（取得総額が固定）を、段階ごとの自己資金で試す */
-export function tryHouse(ctx: Context, house: HouseModel, tier: TierKey, scenario: Scenario = ctx.sc[tier]): Trial {
+export function tryHouse(ctx: Context, house: HouseModel, tier: TierKey, scenario?: Scenario): Trial {
   const { r } = ctx;
   const total = house.price + house.misc;
   let loan = Math.max(0, total - Math.max(0, ctx.cashBefore));
@@ -249,8 +306,8 @@ export function tryHouse(ctx: Context, house: HouseModel, tier: TierKey, scenari
   }
   loan = Math.max(0, total - info.down);
   const purchase: Purchase = { house, loan, down: info.down, ym: r.purchaseYM, terms: ctx.terms };
-  const sim = simulate(r, purchase, scenario);
-  return { loan, down: info.down, total, house, purchase, sim, fail: checkTier(r, sim, tier) };
+  const ev = evaluate(ctx, purchase, tier, scenario);
+  return { loan, down: info.down, total, house, purchase, sim: ev.sim, fail: ev.fail };
 }
 
 export interface TierResult {
@@ -356,24 +413,57 @@ export function metricsOf(ctx: Context, sim: SimResult): Metrics {
   };
 }
 
-export interface Recommendation {
-  ready: boolean;
-  ctx: Context | null;
-  tiers: Record<TierKey, TierResult> | null;
-  bank: BankLimit | null;
-  /** ② 無理なく返せる推奨借入額（標準） */
+export interface Budget {
   loan: Yen;
   total: Yen;
   price: Yen;
   down: Yen;
-  bankBinds: boolean;
-  /** 推奨額で購入した場合（標準条件ではなく基本シナリオ）の推移 */
+  payment: Yen;
+  paymentBonus: Yen;
+}
+
+export interface Recommendation {
+  ready: boolean;
+  ctx: Context | null;
+  tiers: Record<TierKey, TierResult> | null;
+  /** 金融機関の審査の目安（参考値） */
+  bank: BankLimit | null;
+  /** ① 毎月無理なく返済できる金額（②の初回返済額。ボーナス返済は別） */
+  payment: Yen;
+  paymentBonus: Yen;
+  /** ② ①から金利・返済期間で逆算した借入目安額（家計上、標準の条件を満たす上限） */
+  loan: Yen;
+  /** ③ 家計上の住宅購入予算 = ② + 充当自己資金 = 物件価格 + 諸費用 */
+  total: Yen;
+  price: Yen;
+  down: Yen;
+  /** ② が審査の目安を超えている（その分は借りられない可能性が高い） */
+  overBank: boolean;
+  /** 実際に目指す予算 = 借入は ② と審査の目安の小さい方 */
+  final: Budget;
+  /** final で購入した場合の推移（想定どおり） */
   sim: SimResult | null;
+  /** ② で購入した場合の推移（想定どおり・内訳の計算用） */
+  hhSim: SimResult | null;
+  /** ② を決めた条件（標準のうち上限を決めた条件）での推移 */
+  stdSim: SimResult | null;
+  stdScenario: ScenarioKey;
   metrics: Metrics | null;
 }
 
+const EMPTY_BUDGET: Budget = { loan: 0, total: 0, price: 0, down: 0, payment: 0, paymentBonus: 0 };
+
+const budgetOf = (t: Trial): Budget => {
+  const sch = t.sim.schedule;
+  return { loan: t.loan, total: t.total, price: t.house.price, down: t.down, payment: sch ? sch.firstMonthly : 0, paymentBonus: sch ? sch.bonus[5] ?? 0 : 0 };
+};
+
 export function recommend(r: Resolved): Recommendation {
-  if (!r.ready) return { ready: false, ctx: null, tiers: null, bank: null, loan: 0, total: 0, price: 0, down: 0, bankBinds: false, sim: null, metrics: null };
+  if (!r.ready)
+    return {
+      ready: false, ctx: null, tiers: null, bank: null, payment: 0, paymentBonus: 0, loan: 0, total: 0, price: 0, down: 0, overBank: false,
+      final: EMPTY_BUDGET, sim: null, hhSim: null, stdSim: null, stdScenario: 'rate1', metrics: null,
+    };
   const ctx = makeContext(r);
   const tiers = {
     safe: searchTier(ctx, 'safe'),
@@ -381,22 +471,57 @@ export function recommend(r: Resolved): Recommendation {
     caution: searchTier(ctx, 'caution'),
   };
   const std = tiers.standard;
-  const bankBinds = std.ok && std.maxLoan > ctx.bank.amount;
-  const loan = std.ok ? Math.min(std.maxLoan, ctx.bank.amount) : 0;
-  const trial = tryLoan(ctx, loan, 'standard', ctx.sc.base);
+  // 家計上の上限（審査の目安では頭打ちにしない）
+  const loan = std.ok ? std.maxLoan : 0;
+  const hh = tryLoan(ctx, loan, 'standard', ctx.sc.base);
+  // 借入額の上限を決めた条件（1万円多く借りると崩れる条件）での推移
+  const bindKey = (std.ok ? std.binding : std.zeroFail)?.scenario ?? 'rate1';
+  const stdTrial = tryLoan(ctx, loan, 'standard', ctx.sc[bindKey]);
+  const overBank = std.ok && loan > ctx.bank.amount;
+  // 実際に目指す予算: 審査の目安を超える分は借りられないものとする
+  const fin = overBank ? tryLoan(ctx, ctx.bank.amount, 'standard', ctx.sc.base) : hh;
+  const b = budgetOf(hh);
   return {
     ready: true,
     ctx,
     tiers,
     bank: ctx.bank,
+    payment: b.payment,
+    paymentBonus: b.paymentBonus,
     loan,
-    total: std.ok ? trial.total : 0,
-    price: std.ok ? trial.house.price : 0,
-    down: trial.down,
-    bankBinds,
-    sim: std.ok ? trial.sim : null,
-    metrics: std.ok ? metricsOf(ctx, trial.sim) : null,
+    total: std.ok ? b.total : 0,
+    price: std.ok ? b.price : 0,
+    down: b.down,
+    overBank,
+    final: std.ok ? budgetOf(fin) : { ...EMPTY_BUDGET, down: fin.down },
+    sim: fin.sim,
+    hhSim: hh.sim,
+    stdSim: stdTrial.sim,
+    stdScenario: bindKey,
+    metrics: std.ok ? metricsOf(ctx, fin.sim) : null,
   };
+}
+
+/** 中心値の前後だけを探す（感度分析用。結果は searchTier と同じ1万円単位） */
+export function searchTierNear(ctx: Context, tier: TierKey, center: Yen, span: Yen = 40_000_000): TierResult {
+  let lo = Math.max(0, Math.floor((center - span) / STEP) * STEP);
+  let hi = Math.ceil((center + span) / STEP) * STEP;
+  const lt = tryLoan(ctx, lo, tier);
+  if (lt.fail) return searchTier(ctx, tier);
+  const ht = tryLoan(ctx, hi, tier);
+  if (!ht.fail) return searchTier(ctx, tier);
+  let best = lt;
+  while (hi - lo > STEP) {
+    const mid = Math.floor((lo + hi) / 2 / STEP) * STEP;
+    if (mid <= lo) break;
+    const t = tryLoan(ctx, mid, tier);
+    if (t.fail) hi = mid;
+    else {
+      lo = mid;
+      best = t;
+    }
+  }
+  return { tier, ok: true, maxLoan: best.loan, total: best.total, price: best.house.price, down: best.down, binding: tryLoan(ctx, best.loan + STEP, tier).fail, zeroFail: null };
 }
 
 /** 段階の判定（ある購入が安心〜危険のどこか） */

@@ -3,6 +3,7 @@ import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
 import { AssetChart, Donut, SLICE_COLOR, YearBars } from '../components/charts';
 import { Kpi, Money } from '../components/bits';
 import { useFit, useSwipe } from '../components/fields';
+import { Switcher } from '../components/Switcher';
 import { yen } from '../format';
 import { Icon } from '../icons';
 import { useStore } from '../store';
@@ -24,7 +25,9 @@ export function FP() {
           ライフプランを入力
         </button>
       </div>
-      {mode === 'result' ? (s.vm?.fp ? <Result /> : s.vm && !s.vm.ready ? <NeedInput /> : <Loading />) : <Inputs />}
+      <Switcher k={mode} dir={mode === 'input' ? 1 : -1}>
+        {mode === 'result' ? s.vm?.fp ? <Result /> : s.vm && !s.vm.ready ? <NeedInput /> : <Loading /> : <Inputs />}
+      </Switcher>
     </div>
   );
 }
@@ -48,7 +51,13 @@ function Result() {
   const s = useStore();
   const vm = s.vm!;
   const fp = vm.fp!;
-  const [view, setView] = useState<View>('month');
+  const [view, setViewState] = useState<View>('month');
+  const [vdir, setVdir] = useState(1);
+  const VIEWS: View[] = ['month', 'year', 'asset'];
+  const setView = (v: View) => {
+    setVdir(VIEWS.indexOf(v) >= VIEWS.indexOf(view) ? 1 : -1);
+    setViewState(v);
+  };
   const startY = ymYear(vm.start);
   const endY = fp.years[fp.years.length - 1].year;
   const retireY = ymYear(vm.retireAllYM);
@@ -108,6 +117,7 @@ function Result() {
         ))}
       </div>
       <div className="card fill stack" {...swipe}>
+        <Switcher k={view} dir={vdir}>
         {view === 'month' && (
           <>
             <div className="donut-wrap">
@@ -169,6 +179,7 @@ function Result() {
             </div>
           </>
         )}
+        </Switcher>
       </div>
     </>
   );
