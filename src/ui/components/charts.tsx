@@ -1,5 +1,5 @@
 import React from 'react';
-import type { PieSlice, YearRow } from '../../engine/aggregate';
+import type { PieSlice, SplitItem, SplitKey, YearRow } from '../../engine/aggregate';
 import { yen } from '../format';
 import { useSize } from './fields';
 
@@ -12,6 +12,35 @@ export const SLICE_COLOR: Record<PieSlice['key'], string> = {
   other: 'var(--c-other)',
   rest: 'var(--c-rest)',
 };
+
+/** 収入の持ち主の色（本人・配偶者・世帯の収入） */
+export const PERSON_COLOR: Record<SplitKey, string> = { self: 'var(--c-self)', spouse: 'var(--c-spouse)', other: 'var(--c-shared)' };
+
+/**
+ * 夫婦それぞれの収入（と児童手当などの世帯の収入）の内訳。割合の帯と、名前・金額の行。
+ * wide: 横1行に並べ、割合も出す（年の収支用）
+ */
+export function IncomeSplit({ items, names, wide }: { items: SplitItem[]; names: Record<SplitKey, string>; wide?: boolean }) {
+  const total = items.reduce((t, x) => t + Math.max(0, x.value), 0);
+  const share = (v: number) => (total > 0 ? Math.round((Math.max(0, v) / total) * 100) : 0);
+  return (
+    <div className={`incsplit${wide ? ' wide' : ''}`} aria-label={`収入の内訳: ${items.map((x) => `${names[x.key]} ${yen(x.value)}`).join('、')}`}>
+      <div className="bar" aria-hidden="true">
+        {items.map((x) => x.value > 0 && <i key={x.key} style={{ width: `${(x.value / Math.max(1, total)) * 100}%`, background: PERSON_COLOR[x.key] }} />)}
+      </div>
+      <div className="who" aria-hidden="true">
+        {items.map((x) => (
+          <span key={x.key} className={`w k-${x.key}`}>
+            <i style={{ background: PERSON_COLOR[x.key] }} />
+            <span className="nm">{names[x.key]}</span>
+            <b className="num">{yen(x.value)}</b>
+            {wide && <small className="num">{share(x.value)}%</small>}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** 月の収支の円グラフ。大きさは項目数に関係なく固定 */
 export function Donut({ slices, income, size = 132, sel }: { slices: PieSlice[]; income: number; size?: number; sel?: PieSlice['key'] | null }) {
@@ -53,7 +82,7 @@ export function Donut({ slices, income, size = 132, sel }: { slices: PieSlice[];
       <text x={r} y={r - 10} textAnchor="middle" fontSize="10" fill="var(--ink-3)" fontFamily="var(--font)">
         月の収入
       </text>
-      <text x={r} y={r + 6} textAnchor="middle" fontSize="15" fontWeight="800" fill="var(--ink)" fontFamily="var(--num)">
+      <text x={r} y={r + 6} textAnchor="middle" fontSize={size < 110 ? 14 : 15} fontWeight="800" fill="var(--ink)" fontFamily="var(--num)">
         {yen(income)}
       </text>
       <text x={r} y={r + 20} textAnchor="middle" fontSize="10" fontWeight="700" fill={rest.value < 0 ? 'var(--red)' : 'var(--ink-3)'} fontFamily="var(--num)">

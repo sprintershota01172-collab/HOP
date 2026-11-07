@@ -1,4 +1,4 @@
-import { homeValueAt, incomeOf, spendOf, type PartCat, type SimResult } from './simulate';
+import { homeValueAt, incomeOf, spendOf, type IncomeOwner, type PartCat, type SimResult } from './simulate';
 import type { Yen } from './types';
 import { ymYear } from './ym';
 
@@ -126,9 +126,30 @@ export interface DetailRow {
   span?: string;
   /** span がある場合の、その期間の月額 */
   perMonth?: Yen;
+  /** 誰の収入か（収入の行だけ。世帯の収入は未設定） */
+  owner?: IncomeOwner;
 }
-/** fundPaid: その年に積立から払った支出（年の合計） */
-export type PieDetail = Record<PieSlice['key'], DetailRow[]> & { fundPaid: DetailRow[] };
+/**
+ * fundPaid: その年に積立から払った支出（年の合計）
+ * income: 収入の内訳（本人 → 配偶者 → 世帯の収入の順。合計は月平均の収入と一致）
+ */
+export type PieDetail = Record<PieSlice['key'], DetailRow[]> & { fundPaid: DetailRow[]; income: DetailRow[] };
+
+/** 収入を「誰の収入か」で分けたもの。other は児童手当・住宅ローン控除・保険の受取など世帯の収入 */
+export type SplitKey = IncomeOwner | 'other';
+export interface SplitItem {
+  key: SplitKey;
+  value: Yen;
+}
+const SPLIT_ORDER: Record<SplitKey, number> = { self: 0, spouse: 1, other: 2 };
+const splitKey = (owner: IncomeOwner | undefined): SplitKey => owner ?? 'other';
+
+/** 収入の行を持ち主ごとに合計する（金額のない持ち主は除く）。行の合計がそのまま全体の合計になる */
+export function splitOf(rows: Pick<DetailRow, 'owner' | 'value'>[]): SplitItem[] {
+  const by = new Map<SplitKey, number>();
+  for (const r of rows) by.set(splitKey(r.owner), (by.get(splitKey(r.owner)) ?? 0) + r.value);
+  return [...by.entries()].filter(([, v]) => v !== 0).map(([key, value]) => ({ key, value })).sort((a, b) => SPLIT_ORDER[a.key] - SPLIT_ORDER[b.key]);
+}
 
 const SLICE_CAT: Record<Exclude<PieSlice['key'], 'rest'>, PartCat> = {
   living: 'living', housing: 'housing', education: 'education', insurance: 'insurance', saving: 'saving', other: 'other',
@@ -162,7 +183,7 @@ function detailOf(sim: SimResult, idx: number[], y: YearRow): PieDetail {
       if (Math.abs(pt.v[i]) >= 0.5) act.push(i);
     }
     if (Math.abs(v) < 0.5) continue;
-    const row: DetailRow = { key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once };
+    const row: DetailRow = { key: pt.key, label: pt.label, value: v / n, sheet: pt.sheet, props: pt.props, once: pt.once, owner: pt.owner };
     // 毎月の項目が、選んだ期間の途中から始まる（途中で終わる）場合は、その月額も示す
     if (!pt.once && act.length > 0 && act.length < idx.length && act[act.length - 1] - act[0] + 1 === act.length) {
       const mon = (i: number) => (sim.rows[i].ym % 12) + 1;
@@ -193,7 +214,11 @@ function detailOf(sim: SimResult, idx: number[], y: YearRow): PieDetail {
     d[sl.key] = fit(sums.get(SLICE_CAT[sl.key]), sl.value).map((r) => ({ ...r, op: '−' as const }));
   }
   const rest = pie.slices.find((x) => x.key === 'rest')!;
-  const income = fit(sums.get('income'), pie.income).map((r) => ({ ...r, op: '+' as const }));
+  // 収入は「本人 → 配偶者 → 世帯」の順にまとめ、それぞれの中は金額の大きい順
+  const income = fit(sums.get('income'), pie.income)
+    .sort((a, b) => SPLIT_ORDER[splitKey(a.owner)] - SPLIT_ORDER[splitKey(b.owner)] || b.value - a.value)
+    .map((r) => ({ ...r, op: '+' as const }));
+  d.income = income;
   d.rest = [...income, { key: 'spent', label: '支出と積立の合計', value: pie.income - rest.value, op: '−', sheet: '' }];
   d.fundPaid = (sums.get('fundPaid') ?? []).map((r) => ({ ...r, value: Math.round(r.value * n) }));
   return d;
@@ -208,6 +233,29 @@ export interface MonthPie {
   withdraw: Yen;
   fundOut: Yen;
   detail: PieDetail;
+  /** 月の収入の持ち主別（月平均。合計 = income） */
+  split: SplitItem[];
+  /** 期間の収入の持ち主別の合計（年平均の場合は年の合計。合計 = その期間の収入の合計） */
+  splitSum: SplitItem[];
+}
+
+/** 指定した月の収入を持ち主別に合計し、円単位に丸める（丸めの差は最も大きい持ち主で調整して total に合わせる） */
+function splitTotal(sim: SimResult, idx: number[], total: Yen): SplitItem[] {
+  const rows: { owner?: IncomeOwner; value: number }[] = [];
+  for (const pt of sim.parts ?? []) {
+    if (pt.cat !== 'income') continue;
+    let v = 0;
+    for (const i of idx) v += pt.v[i];
+    if (Math.abs(v) >= 0.5) rows.push({ owner: pt.owner, value: v });
+  }
+  const list = splitOf(rows).map((x) => ({ ...x, value: Math.round(x.value) }));
+  const diff = total - list.reduce((t, x) => t + x.value, 0);
+  if (diff !== 0) {
+    const big = [...list].sort((a, b) => b.value - a.value)[0];
+    if (big) big.value += diff;
+    else list.push({ key: 'other', value: diff });
+  }
+  return list.filter((x) => x.value !== 0);
 }
 
 /**
@@ -222,7 +270,8 @@ export function monthPies(sim: SimResult, years: YearRow[]): MonthPie[][] {
     const make = (kind: PieKind, idx: number[]): MonthPie => {
       const yy = toYears({ ...sim, rows: idx.map((i) => sim.rows[i]) })[0];
       const p = monthPie(yy);
-      return { kind, months: idx.length, ...p, detail: detailOf(sim, idx, yy) };
+      const detail = detailOf(sim, idx, yy);
+      return { kind, months: idx.length, ...p, detail, split: splitOf(detail.income), splitSum: splitTotal(sim, idx, yy.income) };
     };
     const isBonusMonth = (i: number) => {
       const mon = (sim.rows[i].ym % 12) + 1;

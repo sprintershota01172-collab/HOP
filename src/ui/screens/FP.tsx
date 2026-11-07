@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import type { DetailRow, PieKind, PieSlice } from '../../engine/aggregate';
+import type { DetailRow, PieKind, PieSlice, SplitKey } from '../../engine/aggregate';
 import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
-import { AssetChart, Donut, MonthAssetChart, SLICE_COLOR, YearBars } from '../components/charts';
+import { AssetChart, Donut, IncomeSplit, MonthAssetChart, PERSON_COLOR, SLICE_COLOR, YearBars } from '../components/charts';
 import { Badge, Kpi, Money } from '../components/bits';
 import { useFit, usePages, useSwipe } from '../components/fields';
 import { Switcher } from '../components/Switcher';
@@ -13,6 +13,15 @@ import { useStore } from '../store';
 import { Loading, SampleBanner } from './Home';
 
 type View = 'month' | 'year' | 'asset';
+/** 内訳を表示する項目: 円グラフの項目、または収入 */
+type Sel = PieSlice['key'] | 'income';
+
+/** 収入の持ち主の呼び名 */
+export const splitNames = (people: { id: string; name: string }[]): Record<SplitKey, string> => ({
+  self: people.find((x) => x.id === 'self')?.name || '本人',
+  spouse: people.find((x) => x.id === 'spouse')?.name || '配偶者',
+  other: 'その他',
+});
 
 export function FP() {
   const s = useStore();
@@ -86,9 +95,13 @@ function Result() {
   const [kind, setKind] = useState<PieKind>('normal');
   const pie = entry.list.find((x) => x.kind === kind) ?? entry.list[0];
   // 内訳を表示する項目（未選択なら、いちばん大きい支出）
-  const [sel, setSel] = useState<PieSlice['key'] | null>(null);
+  const [sel, setSel] = useState<Sel | null>(null);
   const biggest = [...pie.slices].filter((x) => x.key !== 'rest').sort((a, b) => b.value - a.value)[0]?.key ?? 'living';
-  const cur: PieSlice['key'] = sel ?? biggest;
+  const cur: Sel = sel ?? biggest;
+  const curSlice = cur === 'income' ? null : pie.slices.find((x) => x.key === cur)!;
+  const names = splitNames(vm.people);
+  // 年の収支: 夫婦それぞれの年間の収入
+  const yearSplit = entry.list.find((x) => x.kind === 'avg')?.splitSum ?? [];
   return (
     <>
       <div className="row" style={{ flex: 'none' }}>
@@ -153,7 +166,11 @@ function Result() {
               <span className="micro ellipsis">{entry.list.length > 1 ? (pie.kind === 'normal' ? '賞与なしの月' : pie.kind === 'bonus' ? '6・12月' : '賞与を12か月で平均') : '賞与なし・毎月同じ'}</span>
             </div>
             <div className="donut-wrap">
-              <Donut slices={pie.slices} income={pie.income} sel={cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 108 : 132} />
+              {/* 円グラフと夫婦それぞれの収入。タップすると下に収入の内訳を出す */}
+              <button className="donut-col" aria-pressed={cur === 'income' ? 'true' : 'false'} onClick={() => setSel('income')} aria-label="収入の内訳を見る">
+                <Donut slices={pie.slices} income={pie.income} sel={cur === 'income' ? null : cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 98 : 132} />
+                <IncomeSplit items={pie.split} names={names} />
+              </button>
               <div className="legend" role="tablist" aria-label="内訳を見る項目">
                 {pie.slices.map((x) => (
                   <button className={`li${x.key !== 'rest' && Math.round(x.value) === 0 ? ' zero' : ''}`} key={x.key} role="tab" aria-selected={cur === x.key ? 'true' : 'false'} onClick={() => setSel(x.key)}>
@@ -166,7 +183,16 @@ function Result() {
                 ))}
               </div>
             </div>
-            <Detail key={`${cur}-${year}`} slice={pie.slices.find((x) => x.key === cur)!} rows={pie.detail[cur]} income={pie.income} months={pie.months} year={year} />
+            <Detail
+              key={`${cur}-${year}`}
+              sel={cur}
+              label={curSlice ? curSlice.label : '収入'}
+              value={curSlice ? curSlice.value : pie.income}
+              rows={pie.detail[cur]}
+              income={pie.income}
+              months={pie.months}
+              year={year}
+            />
             <Happenings year={year} />
             {pie.detail.fundPaid.length > 0 && (
               <div className="micro ellipsis" style={{ flex: 'none' }}>
@@ -184,6 +210,7 @@ function Result() {
               <Kpi mark={MARK.saved} label="貯金・積立・投資" v={yr.contrib + yr.fund + yr.save} />
               <Kpi mark={MARK.worth} label="年間収支" v={yr.net} sign />
             </div>
+            {yearSplit.length > 0 && <IncomeSplit wide items={yearSplit} names={names} />}
             <YearBars years={fp.years} year={year} onPick={setYear} retireYear={retireY} />
             {fp.goals.length > 0 && (
               <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
@@ -315,9 +342,12 @@ function Happenings({ year }: { year: number }) {
 }
 
 /** 選んだ項目の内訳（月平均）。行をタップすると、その金額の入力画面を開く */
-function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: DetailRow[]; income: number; months: number; year: number }) {
+function Detail({ sel, label, value, rows, income, months, year }: { sel: Sel; label: string; value: number; rows: DetailRow[]; income: number; months: number; year: number }) {
   const s = useStore();
-  const rest = slice.key === 'rest';
+  const rest = sel === 'rest';
+  const inc = sel === 'income';
+  // 残額と収入は「+ − =」の計算の形で出す（収入は、誰の収入かを色で示す）
+  const calc = rest || inc;
   const short = typeof window !== 'undefined' && window.innerHeight <= 700;
   const fit = useFit<HTMLDivElement>(short ? 25.5 : 29.5, 3, 1);
   const pg = usePages(rows, Math.max(1, fit.n));
@@ -325,15 +355,15 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
     <div className="stack fill detail" style={{ gap: 2 }}>
       <div className="row" style={{ gap: 6 }}>
         <span className="label ellipsis grow" style={{ fontWeight: 700 }}>
-          <Badge mark={SLICE_MARK[slice.key]} size={18} />
-          {rest ? `残額の計算（収入 ${yen(income)}）` : `${slice.label}の内訳`}
+          <Badge mark={inc ? MARK.income : SLICE_MARK[sel]} size={18} />
+          {rest ? `残額の計算（収入 ${yen(income)}）` : `${label}の内訳`}
           <small className="micro" style={{ fontWeight: 400 }}>
             {' '}
             {year}年・月平均{months < 12 ? `（${months}か月）` : ''}
             {rows.some((r) => r.once || r.span) ? `・合計÷${months}か月` : ''}
           </small>
         </span>
-        {rest && short && <b className={`num${slice.value < 0 ? ' neg' : ''}`} style={{ flex: 'none' }}>= {yen(slice.value)}</b>}
+        {calc && short && <b className={`num${value < 0 ? ' neg' : ''}`} style={{ flex: 'none' }}>= {yen(value)}</b>}
         {pg.pages > 1 && (
           <span className="minipager">
             <button disabled={pg.page === 0} onClick={() => pg.setPage(pg.page - 1)} aria-label="前のページ">
@@ -349,12 +379,18 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
         )}
       </div>
       {rows.length === 0 ? (
-        <div className="empty fill">{year}年は{slice.label}がありません</div>
+        <div className="empty fill">{year}年は{label}がありません</div>
       ) : (
         <div className="wf fill" ref={fit.ref}>
           {pg.slice.map((r) => (
-            <button key={r.key} className={`ln${rest ? '' : ' noop'}`} disabled={!r.sheet} onClick={() => r.sheet && s.open({ kind: r.sheet, props: r.props ?? {} })}>
-              {rest && <span className={`op${r.op === '+' ? ' plus' : ''}`}>{r.op}</span>}
+            <button key={r.key} className={`ln${calc ? '' : ' noop'}`} disabled={!r.sheet} onClick={() => r.sheet && s.open({ kind: r.sheet, props: r.props ?? {} })}>
+              {inc ? (
+                <span className="op">
+                  <i className="pdot" style={{ background: PERSON_COLOR[r.owner ?? 'other'] }} />
+                </span>
+              ) : (
+                rest && <span className={`op${r.op === '+' ? ' plus' : ''}`}>{r.op}</span>
+              )}
               <span className="nm ellipsis">{r.label}</span>
               <span className="v">
                 {r.once && <em className="once">一時</em>}
@@ -366,12 +402,12 @@ function Detail({ slice, rows, income, months, year }: { slice: PieSlice; rows: 
           ))}
         </div>
       )}
-      {rest && !short && (
+      {calc && !short && (
         <div className="wf">
           <div className="total" style={{ paddingTop: 2 }}>
             <span className="op">=</span>
-            <span className="nm" style={{ fontWeight: 800 }}>{slice.value < 0 ? '赤字' : '残額'}</span>
-            <span className={`v${slice.value < 0 ? ' neg' : ''}`}>{yen(slice.value)}</span>
+            <span className="nm" style={{ fontWeight: 800 }}>{inc ? '収入の合計' : value < 0 ? '赤字' : '残額'}</span>
+            <span className={`v${value < 0 ? ' neg' : ''}`}>{yen(value)}</span>
             <span />
           </div>
         </div>
@@ -416,7 +452,22 @@ function Inputs() {
   return (
     <>
       <div className="card grid3" style={{ flex: 'none' }}>
-        <Kpi label="世帯の手取り（月）" v={net} />
+        <Kpi
+          label="世帯の手取り（月）"
+          v={net}
+          sub={
+            p.spouse ? (
+              <>
+                {people.map((x) => (
+                  <span key={x.id} className="pline">
+                    <i className="pdot" style={{ background: PERSON_COLOR[x.id === 'spouse' ? 'spouse' : 'self'] }} />
+                    {x.name || (x.id === 'spouse' ? '配偶者' : '本人')} {x.netMonthly != null ? yen(x.netMonthly) : '未入力'}
+                  </span>
+                ))}
+              </>
+            ) : undefined
+          }
+        />
         <Kpi label="現金" v={cash} />
         <Kpi label="投資" v={inv} />
       </div>

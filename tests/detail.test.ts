@@ -276,3 +276,43 @@ describe('月の収支: ふだんの月とボーナス月', () => {
     assert.deepEqual(all[2].map((x) => x.kind), ['avg']);
   });
 });
+
+describe('月の収支: 夫婦それぞれの収入の内訳', () => {
+  const pies = async (d: AppData) => {
+    const { monthPies } = await import('../src/engine/aggregate');
+    const c = computeAll(d);
+    return { c, all: monthPies(c.fp!.sim, c.fp!.years) };
+  };
+  it('持ち主別の合計（月平均・期間の合計）は、収入の合計と毎年すべて円単位で一致する', async () => {
+    for (const d of [sampleData(BASE), household({ children: 2 }), household({ spouse: false })]) {
+      const { c, all } = await pies(d);
+      c.fp!.years.forEach((y, i) => {
+        for (const p of all[i]) {
+          assert.equal(p.split.reduce((t, x) => t + x.value, 0), p.income, `${y.year} ${p.kind} 月平均`);
+          assert.equal(p.detail.income.reduce((t, x) => t + x.value, 0), p.income, `${y.year} ${p.kind} 内訳`);
+        }
+        const avg = all[i].find((x) => x.kind === 'avg')!;
+        assert.equal(avg.splitSum.reduce((t, x) => t + x.value, 0), y.income, `${y.year} 年の合計`);
+      });
+    }
+  });
+  it('給与・賞与は本人と配偶者に分かれ、児童手当は世帯の収入になる。並びは本人 → 配偶者 → 世帯', async () => {
+    const { all } = await pies(household({ children: 1, net: 300_000, spouseNet: 220_000 }));
+    // 子供が生まれた後・まだ育休のない年（2030年）のふだんの月
+    const y = all[4].find((x) => x.kind === 'normal')!;
+    const by = Object.fromEntries(y.split.map((x) => [x.key, x.value]));
+    assert.ok(by.self > by.spouse && by.spouse > 0, '本人の方が多い');
+    assert.ok(by.other > 0, '児童手当');
+    assert.deepEqual(y.split.map((x) => x.key), ['self', 'spouse', 'other']);
+    const owners = y.detail.income.map((r) => r.owner ?? 'other');
+    assert.deepEqual(owners, [...owners].sort((a, b) => ['self', 'spouse', 'other'].indexOf(a) - ['self', 'spouse', 'other'].indexOf(b)), '持ち主ごとにまとまる');
+    assert.ok(y.detail.income.some((r) => r.owner === 'self' && r.label.endsWith('の給与') && r.props?.who === 'self'), '給与の行から本人の収入の画面を開ける');
+    assert.ok(y.detail.income.some((r) => r.owner === undefined && r.label === '児童手当'));
+    // 残額の計算も同じ並び
+    assert.deepEqual(y.detail.rest.filter((r) => r.op === '+').map((r) => r.key), y.detail.income.map((r) => r.key));
+  });
+  it('配偶者がいなければ、本人と世帯の収入だけ', async () => {
+    const { all } = await pies(household({ spouse: false }));
+    for (const list of all) for (const p of list) assert.ok(!p.split.some((x) => x.key === 'spouse'));
+  });
+});

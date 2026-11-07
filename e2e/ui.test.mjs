@@ -540,6 +540,59 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('月の収支・年の収支: 夫婦それぞれの収入が出て、タップで収入の内訳 → その人の収入の入力を開ける', async () => {
+    const { ctx, page } = await open([390, 844]);
+    await settle(page);
+    await page.click('nav button:nth-child(2)');
+    await page.waitForSelector('.donut-col .incsplit');
+    const who = await page.$$eval('.donut-col .incsplit .w', (els) => els.map((e) => e.textContent));
+    assert.ok(who.some((t) => t.startsWith('たろう')) && who.some((t) => t.startsWith('はなこ')), who.join(' / '));
+    await page.click('.donut-col');
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator('.donut-col[aria-pressed="true"]').count(), 1);
+    assert.match(await page.locator('.detail .label').first().textContent(), /収入の内訳/);
+    assert.ok((await page.locator('.detail .ln .pdot').count()) > 0, '行に持ち主の色');
+    // 配偶者の給与の行 → 配偶者の収入の画面
+    let row = page.locator('.detail .ln:has-text("はなこの給与")').first();
+    for (let i = 0; i < 10 && !(await row.count()); i++) {
+      await page.click('.detail .minipager button[aria-label="次のページ"]');
+      await page.waitForTimeout(150);
+    }
+    await row.click();
+    await page.waitForTimeout(400);
+    const sheet = page.locator('.sheet:not(.closing)').last();
+    assert.equal(await sheet.locator('h2').textContent(), '収入');
+    assert.match(await sheet.locator('.seg button[aria-pressed="true"]').first().textContent(), /^はなこ/);
+    assert.match(await sheet.locator('.seg').first().textContent(), /たろう 月.*はなこ 月/, '切り替えに夫婦それぞれの手取り月収');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    // 年の収支: 年間の収入を持ち主別に（合計は収入と一致）
+    await page.click('.screen .seg button:has-text("年の収支")');
+    await page.waitForSelector('.incsplit.wide');
+    const shares = await page.$$eval('.incsplit.wide .w small', (els) => els.map((e) => parseInt(e.textContent, 10)));
+    assert.ok(Math.abs(shares.reduce((t, v) => t + v, 0) - 100) <= 2, shares.join(','));
+    await ctx.close();
+  });
+
+  it('375×560: 円グラフを隠す高さでも、夫婦の収入は凡例の空き枠に重ならずに出る', async () => {
+    const { ctx, page } = await open([375, 560]);
+    await page.click('nav button:nth-child(2)');
+    await page.waitForSelector('.donut-col');
+    await page.waitForTimeout(400);
+    const r = await page.evaluate(() => {
+      const box = document.querySelector('.donut-col').getBoundingClientRect();
+      const hit = [...document.querySelectorAll('.legend button.li')].filter((b) => {
+        const q = b.getBoundingClientRect();
+        return q.right > box.left + 0.5 && q.left < box.right - 0.5 && q.bottom > box.top + 0.5 && q.top < box.bottom - 0.5;
+      });
+      return { h: box.height, w: box.width, hit: hit.length, amounts: document.querySelectorAll('.donut-col .w:not(.k-other) b').length };
+    });
+    assert.ok(r.h > 10 && r.w > 100, JSON.stringify(r));
+    assert.equal(r.hit, 0, '凡例の項目と重ならない');
+    assert.equal(r.amounts, 2);
+    await ctx.close();
+  });
+
   it('繰上返済・収入の変化・売却を入力でき、画面に収まる', async () => {
     const { ctx, page } = await open([375, 667]);
     await settle(page);

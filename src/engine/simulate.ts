@@ -388,18 +388,23 @@ export interface Part {
   once?: boolean;
   /** 購入後の勤労収入（シナリオの収入倍率を掛ける） */
   work?: boolean;
+  /** 誰の収入か（給与・賞与・給付・年金・退職金など）。世帯の収入（児童手当・控除など）は未設定 */
+  owner?: IncomeOwner;
   v: number[];
 }
+
+/** 収入の持ち主（本人・配偶者） */
+export type IncomeOwner = 'self' | 'spouse';
 
 class Parts {
   map = new Map<string, Part>();
   constructor(readonly n: number) {}
-  add(i: number, cat: PartCat, key: string, label: string, value: number, meta?: Partial<Pick<Part, 'sheet' | 'props' | 'once' | 'work'>>) {
+  add(i: number, cat: PartCat, key: string, label: string, value: number, meta?: Partial<Pick<Part, 'sheet' | 'props' | 'once' | 'work' | 'owner'>>) {
     if (!value) return;
     const k = `${cat}:${key}`;
     let p = this.map.get(k);
     if (!p) {
-      p = { cat, key, label, sheet: meta?.sheet ?? '', props: meta?.props, once: meta?.once, work: meta?.work, v: new Array<number>(this.n).fill(0) };
+      p = { cat, key, label, sheet: meta?.sheet ?? '', props: meta?.props, once: meta?.once, work: meta?.work, owner: meta?.owner, v: new Array<number>(this.n).fill(0) };
       this.map.set(k, p);
     }
     p.v[i] += value;
@@ -542,8 +547,10 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
       if (hist.length > 6) hist.shift();
       salary += w.salary;
       benefit += w.benefit;
-      rec?.add(i, 'income', `salary:${p.id}`, m >= p.retireYM ? `${p.name}の再雇用の給与` : `${p.name}の給与`, w.salary, { sheet: 'income', work: true });
-      rec?.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true });
+      const owner: IncomeOwner = p.id === 'self' ? 'self' : 'spouse';
+      const who = { who: owner };
+      rec?.add(i, 'income', `salary:${p.id}`, m >= p.retireYM ? `${p.name}の再雇用の給与` : `${p.name}の給与`, w.salary, { sheet: 'income', props: who, work: true, owner });
+      rec?.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true, owner });
       const spread = !!plan[p.id === 'self' ? 'self' : 'spouse']?.bonusSpread;
       const bonusNow = m < p.retireYM ? baseIncome(r, p, m).bonus : 0;
       if ((spread || mon === 6 || mon === 12) && bonusNow > 0) {
@@ -552,16 +559,16 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
         const avg = window.reduce((s, v) => s + v, 0) / 6;
         const b = (bonusNow / (spread ? 12 : 2)) * avg;
         bonus += b;
-        rec?.add(i, 'income', `bonus:${p.id}`, spread ? `${p.name}の賞与（月々に分けて）` : `${p.name}の賞与`, b, { sheet: 'income', work: true });
+        rec?.add(i, 'income', `bonus:${p.id}`, spread ? `${p.name}の賞与（月々に分けて）` : `${p.name}の賞与`, b, { sheet: 'income', props: who, work: true, owner });
       }
       if (m === p.retireYM) {
         retireBonus += p.retireBonus;
-        rec?.add(i, 'income', `retire:${p.id}`, `${p.name}の退職金`, p.retireBonus, { sheet: 'income', once: true });
+        rec?.add(i, 'income', `retire:${p.id}`, `${p.name}の退職金`, p.retireBonus, { sheet: 'income', props: { ...who, page: 'retire' }, once: true, owner });
       }
       if (m >= p.pensionYM) {
         const pv = p.pension * Math.pow(1 + pensionGrowth, y - baseYear);
         pension += pv;
-        rec?.add(i, 'income', `pension:${p.id}`, `${p.name}の年金`, pv, { sheet: 'income' });
+        rec?.add(i, 'income', `pension:${p.id}`, `${p.name}の年金`, pv, { sheet: 'income', props: { ...who, page: 'retire' }, owner });
       }
     }
     pre.salary[i] = salary;
@@ -930,7 +937,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
         const refund = who && m < who.retireYM ? Math.floor(sum * marginalTaxRate(who.gross)) : 0;
         if (refund > 0) {
           row.otherIncome += refund;
-          rec?.add(i, 'income', `ideco:${owner}`, `${who!.name}のiDeCoの節税（年末調整）`, refund, { sheet: 'invest', once: true });
+          rec?.add(i, 'income', `ideco:${owner}`, `${who!.name}のiDeCoの節税（年末調整）`, refund, { sheet: 'invest', once: true, owner: owner === 'spouse' ? 'spouse' : 'self' });
         }
       }
       idecoYear.clear();

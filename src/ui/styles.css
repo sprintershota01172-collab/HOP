@@ -28,6 +28,10 @@
   --c-other: #c8b8a4;
   --c-rest: #e7dfd1;
   --c-home: #d9c9ac;
+  /* 収入の持ち主（本人・配偶者・世帯の収入）。円グラフの項目と重ならない色 */
+  --c-self: #7a6fb5;
+  --c-spouse: #d47b72;
+  --c-shared: #a9a597;
 
   --font: 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'M PLUS Rounded 1c', 'Meiryo UI', Meiryo, 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
   --num: ui-rounded, 'SF Pro Rounded', 'Zen Maru Gothic', 'Hiragino Maru Gothic ProN', 'Meiryo UI', 'Noto Sans JP', system-ui, sans-serif;
@@ -74,6 +78,9 @@
     --c-other: #61584c;
     --c-rest: #3a403a;
     --c-home: #6b5f49;
+    --c-self: #a59ae0;
+    --c-spouse: #e6978d;
+    --c-shared: #7d7a70;
     --scrim: rgba(0, 0, 0, 0.55);
     color-scheme: dark;
   }
@@ -105,6 +112,9 @@
   --c-other: #61584c;
   --c-rest: #3a403a;
   --c-home: #6b5f49;
+  --c-self: #a59ae0;
+  --c-spouse: #e6978d;
+  --c-shared: #7d7a70;
   --scrim: rgba(0, 0, 0, 0.55);
   color-scheme: dark;
 }
@@ -134,7 +144,11 @@
   .app .legend .badge { width: 16px !important; height: 16px !important; }
   .app .legend .badge svg { width: 11px; height: 11px; }
   .app .donut-wrap { grid-template-columns: minmax(0, 1fr); }
-  .app .donut-wrap > svg { display: none; }
+  /* 円グラフを隠す高さ: 夫婦の収入は、凡例（7項目・2列）の空いている右下の枠に金額だけ出す */
+  .app .donut-wrap { position: relative; }
+  .app .donut-col { position: absolute; right: 0; bottom: 0; width: calc(50% - 5px); height: 18px; padding: 0 6px; flex-direction: row; align-items: center; border-radius: 8px; }
+  .app .donut-col > svg, .app .incsplit .bar, .app .incsplit .w .nm, .app .incsplit .w.k-other { display: none; }
+  .app .incsplit .who { flex-direction: row; gap: 8px; }
   .app .legend { grid-template-columns: 1fr 1fr; column-gap: 10px; }
   .app .loan-sub .card.item { padding: 3px 10px !important; }
   .app .loan-sub .grow { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
@@ -156,6 +170,10 @@
 }
 @media (max-height: 700px) {
   .hide-short { display: none !important; }
+  .app .donut-col { padding: 2px; gap: 3px; }
+  .app .incsplit { gap: 3px; }
+  .app .incsplit .bar { height: 4px; }
+  .app .incsplit .w { line-height: 13px; }
   .app .legend { gap: 0; }
   .app .legend button.li { min-height: 22px; padding: 1px 6px; }
   .app .wf .ln { padding: 3px 0; }
@@ -510,6 +528,29 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .legend button.li { border: 0; background: transparent; color: var(--ink); font: inherit; font-size: var(--fs-s); text-align: left; padding: 3px 6px; margin: 0; width: 100%; min-width: 0; border-radius: 8px; min-height: 26px; transition: background 200ms ease; }
 .legend button.li[aria-selected="true"] { background: var(--surface-2); font-weight: 700; }
 .detail { border-top: 1px solid var(--line); padding-top: 6px; }
+/* 円グラフと夫婦それぞれの収入（タップで収入の内訳） */
+.donut-col { display: flex; flex-direction: column; align-items: stretch; gap: 5px; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 4px; margin: 0; border-radius: 12px; min-width: 0; transition: background 200ms ease; }
+.donut-col[aria-pressed='true'] { background: var(--surface-2); }
+.donut-col > svg { align-self: center; }
+.incsplit { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.incsplit .bar { height: 6px; border-radius: 3px; gap: 1.5px; background: transparent; }
+.incsplit .bar i { border-radius: 2px; min-width: 2px; }
+.incsplit .who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.incsplit .w { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: var(--fs-xs); line-height: 1.35; }
+.incsplit .w > i, .pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.incsplit .w .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); text-align: left; }
+.incsplit .w b { flex: none; font-variant-numeric: tabular-nums; }
+.incsplit .w small { flex: none; color: var(--ink-3); font-size: 10.5px; }
+.incsplit.wide { flex: none; gap: 5px; }
+.incsplit.wide .bar { height: 8px; border-radius: 4px; }
+.incsplit.wide .who { flex-direction: row; gap: 4px 12px; flex-wrap: wrap; }
+.incsplit.wide .w { flex: 0 1 auto; font-size: var(--fs-s); }
+.incsplit.wide .w .nm { flex: 0 1 auto; }
+.wf .ln .op .pdot { vertical-align: 1px; }
+.seg button .pdot { margin-right: 5px; vertical-align: 1px; }
+.seg button small { font-weight: 600; font-size: var(--fs-xs); color: var(--ink-3); }
+.kpi .pline { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kpi .pline .pdot { width: 7px; height: 7px; margin-right: 4px; vertical-align: 0; }
 .wf .ln .v .once { font-style: normal; font-family: var(--font); font-size: 10px; font-weight: 700; color: var(--warn); background: var(--warn-soft); border-radius: 4px; padding: 1px 4px; margin-right: 4px; vertical-align: 1px; }
 .minipager { display: flex; align-items: center; gap: 2px; flex: none; font-size: var(--fs-xs); color: var(--ink-2); }
 .minipager button { width: 30px; height: 26px; border: 0; border-radius: 8px; background: var(--surface-2); color: var(--ink); display: grid; place-items: center; padding: 0; }

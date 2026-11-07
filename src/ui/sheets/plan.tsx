@@ -67,9 +67,11 @@ function Paged<T extends string>(props: { pages: { value: T; label: string }[]; 
 }
 
 /* ============================== 収入 ============================== */
-export function IncomeSection() {
+export function IncomeSection({ who: initialWho, page: initialPage }: { who?: Owner; page?: 'income' | 'change' | 'retire' } = {}) {
   const { s, p, up } = usePlan();
-  const [who, setWho] = useState<Owner>('self');
+  const [who, setWho] = useState<Owner>(initialWho === 'spouse' && p.spouse ? 'spouse' : 'self');
+  // それぞれの手取り月収（夫婦の収入を見比べられるように、切り替えのボタンに出す）
+  const netOf = (x: Person | null) => (x?.netMonthly != null ? <small className="num"> 月{yen(x.netMonthly)}</small> : null);
   const person = who === 'self' ? p.self : p.spouse;
   const set = (fn: (x: Person) => void) =>
     up((pl) => {
@@ -80,10 +82,14 @@ export function IncomeSection() {
     <>
       <div className="seg" role="group" aria-label="誰の収入か">
         <button aria-pressed={who === 'self' ? 'true' : 'false'} onClick={() => setWho('self')}>
+          <i className="pdot" style={{ background: 'var(--c-self)' }} />
           {p.self.name || '本人'}
+          {p.spouse && netOf(p.self)}
         </button>
         <button aria-pressed={who === 'spouse' ? 'true' : 'false'} onClick={() => setWho('spouse')}>
+          {p.spouse && <i className="pdot" style={{ background: 'var(--c-spouse)' }} />}
           {p.spouse ? p.spouse.name || '配偶者' : '＋ 配偶者'}
+          {netOf(p.spouse)}
         </button>
       </div>
       <Switcher k={who} dir={who === 'spouse' ? 1 : -1}>
@@ -95,7 +101,7 @@ export function IncomeSection() {
             </button>
           </div>
         ) : (
-          <Paged pages={[{ value: 'income', label: '収入' }, { value: 'change', label: '収入の変化' }, { value: 'retire', label: '退職・年金' }]}>
+          <Paged initial={initialPage} pages={[{ value: 'income', label: '収入' }, { value: 'change', label: '収入の変化' }, { value: 'retire', label: '退職・年金' }]}>
             {(page) =>
               page === 'change' ? (
                 <IncomeChanges who={who} person={person} set={set} />
@@ -199,9 +205,9 @@ export function IncomeChangeSheet({ close, props }: SheetProps) {
   );
 }
 
-export const IncomeSheet = ({ close }: SheetProps) => (
+export const IncomeSheet = ({ close, props }: SheetProps) => (
   <Sheet title="収入" onClose={close} preview foot={<Done close={close} />}>
-    <IncomeSection />
+    <IncomeSection who={props?.who === 'spouse' ? 'spouse' : 'self'} page={props?.page === 'retire' || props?.page === 'change' ? props.page : undefined} />
   </Sheet>
 );
 
