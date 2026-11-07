@@ -16,6 +16,8 @@ export const emptyPerson = (id: 'self' | 'spouse'): Person => ({
   bonusNetAnnual: null,
   grossAnnual: null,
   raiseRate: null,
+  raiseUntilAge: null,
+  raiseAfter: null,
   retireAge: null,
   retireBonus: null,
   pensionStartAge: null,

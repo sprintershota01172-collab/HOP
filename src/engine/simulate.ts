@@ -122,6 +122,8 @@ export interface SimResult {
   parts?: Part[];
   /** 家を売却した月（sale を指定し、売却の予定があるときだけ） */
   soldYM?: YM;
+  /** 人ごとの毎月の勤労収入と働き方（detail を指定したときだけ） */
+  work?: Partial<Record<IncomeOwner, WageMonth[]>>;
 }
 
 /** 家の参考評価額（土地はそのまま、建物は耐用年数で減る。最低1割） */
@@ -315,7 +317,20 @@ export function childAllowance(children: Child[], m: YM): Yen {
   return sum;
 }
 
-/** 本人の勤労収入（給与・給付）と、その月の勤務割合 */
+/**
+ * from から m までの昇給の倍率（毎年4月に反映）。
+ * 昇給が続く年齢（raiseUntilAge）を決めた場合、その年齢になった後の4月からは raiseAfter（横ばい・減少）で変わる
+ */
+export function raiseFactor(p: Pick<RPerson, 'raise' | 'raiseUntilAge' | 'raiseAfter' | 'birthYM'>, from: YM, m: YM): number {
+  if (m <= from) return 1;
+  if (p.raiseUntilAge == null) return Math.pow(1 + p.raise, aprilsBetween(from, m));
+  // 「45歳まで昇給」= 45歳の間に迎える4月までは昇給。4月 a が「a < (その年齢+1)歳になる月」なら昇給、以降は raiseAfter
+  const reach = p.birthYM + (p.raiseUntilAge + 1) * 12;
+  const up = reach - 1 > from ? aprilsBetween(from, Math.min(m, reach - 1)) : 0;
+  const after = aprilsBetween(Math.max(from, reach - 1), m);
+  return Math.pow(1 + p.raise, up) * Math.pow(1 + p.raiseAfter, after);
+}
+
 /** その月の基本の手取り月収・賞与（収入の変化の予定と昇給率を反映） */
 export function baseIncome(r: Resolved, p: RPerson, m: YM): { net: number; bonus: number } {
   let from = r.start, net = p.net, bonus = p.bonus;
@@ -329,24 +344,35 @@ export function baseIncome(r: Resolved, p: RPerson, m: YM): { net: number; bonus
       bonusFrom = c.ym;
     }
   }
-  return { net: net * Math.pow(1 + p.raise, aprilsBetween(from, m)), bonus: bonus * Math.pow(1 + p.raise, aprilsBetween(bonusFrom, m)) };
+  return { net: net * raiseFactor(p, from, m), bonus: bonus * raiseFactor(p, bonusFrom, m) };
 }
 
-function workIncome(r: Resolved, p: RPerson, m: YM): { salary: number; benefit: number; ratio: number } {
+/** その月の働き方: フルタイム・時短・育休（産休を含む）・定年後の再雇用・働いていない */
+export type WorkState = 'full' | 'short' | 'leave' | 'rehire' | 'off';
+
+/** 本人の勤労収入（給与・給付）と、その月の勤務割合・働き方 */
+function workIncome(r: Resolved, p: RPerson, m: YM): { salary: number; benefit: number; ratio: number; state: WorkState } {
   // 定年後の再雇用（給付・時短の対象外。手取りは入力した額のまま）
-  if (m >= p.retireYM) return p.rehire && m < p.rehire.untilYM ? { salary: p.rehire.net, benefit: 0, ratio: 1 } : { salary: 0, benefit: 0, ratio: 0 };
-  if (p.net <= 0 && !p.changes.length) return { salary: 0, benefit: 0, ratio: 0 };
+  if (m >= p.retireYM) return p.rehire && m < p.rehire.untilYM ? { salary: p.rehire.net, benefit: 0, ratio: 1, state: 'rehire' } : { salary: 0, benefit: 0, ratio: 0, state: 'off' };
+  if (p.net <= 0 && !p.changes.length) return { salary: 0, benefit: 0, ratio: 0, state: 'off' };
   const base = baseIncome(r, p, m).net;
-  if (base <= 0) return { salary: 0, benefit: 0, ratio: 0 };
+  if (base <= 0) return { salary: 0, benefit: 0, ratio: 0, state: 'off' };
   const plan = r.plan;
   const benefitsOn = plan.assumptions.leaveBenefits;
   let ratio = 1;
   let benefit = 0;
+  let state: WorkState = 'full';
   for (const w of plan.work) {
     if (w.owner !== p.id) continue;
     if (w.type === 'leave' && m >= w.startYM && m < w.startYM + w.months) {
       ratio = 0;
+      state = 'leave';
       if (!benefitsOn) continue;
+      // カット率を決めた場合: 手取りのその割合を、期間を通して受け取る
+      if (w.payRate != null) {
+        benefit = base * Math.max(0, Math.min(1, w.payRate));
+        continue;
+      }
       const idx = m - w.startYM;
       if (w.maternity && idx < 3) {
         benefit = (base * LEAVE.maternityRate) / LEAVE.netRatio;
@@ -364,13 +390,62 @@ function workIncome(r: Resolved, p: RPerson, m: YM): { salary: number; benefit: 
       }
     } else if (w.type === 'short' && m >= w.startYM && (w.endYM == null || m <= w.endYM)) {
       ratio = Math.min(ratio, Math.max(0, Math.min(1, w.ratio)));
+      if (state !== 'leave' && ratio < 1) state = 'short';
       const child = w.childId ? plan.children.find((c) => c.id === w.childId) : null;
       if (benefitsOn && child && m >= child.birthYM && ageAt(child.birthYM, m) < 2) {
         benefit = Math.min(base * ratio * LEAVE.shortTimeTopUp, base - base * ratio);
       }
     }
   }
-  return { salary: base * ratio, benefit, ratio };
+  return { salary: base * ratio, benefit, ratio, state };
+}
+
+/** 1人の、ある月の勤労収入（物価上昇率に関係しない） */
+export interface WageMonth {
+  /** フルタイムの場合の手取り月収（昇給・収入の変化を反映。カット率の基準） */
+  base: number;
+  salary: number;
+  benefit: number;
+  bonus: number;
+  /** 勤務割合（1 = フルタイム、0 = 育休・退職） */
+  ratio: number;
+  state: WorkState;
+}
+
+const wageCache = new WeakMap<Resolved, Map<string, WageMonth[]>>();
+
+/**
+ * 1人の毎月の勤労収入（給与・育休や時短の給付・賞与）と働き方。開始月から終了月まで。
+ * 賞与は直近6か月の勤務割合の平均を掛ける（育休・時短の期間の賞与は減る）
+ */
+export function wageSeries(r: Resolved, p: RPerson): WageMonth[] {
+  let byId = wageCache.get(r);
+  if (!byId) {
+    byId = new Map();
+    wageCache.set(r, byId);
+  }
+  const hit = byId.get(p.id);
+  if (hit) return hit;
+  const spread = !!r.plan[p.id === 'self' ? 'self' : 'spouse']?.bonusSpread;
+  const hist: number[] = [];
+  const out: WageMonth[] = [];
+  for (let m = r.start; m <= r.end; m++) {
+    const w = workIncome(r, p, m);
+    hist.push(w.ratio);
+    if (hist.length > 6) hist.shift();
+    const mon = ymMonth(m);
+    const bonusNow = m < p.retireYM ? baseIncome(r, p, m).bonus : 0;
+    let bonus = 0;
+    if ((spread || mon === 6 || mon === 12) && bonusNow > 0) {
+      const window = [...hist];
+      while (window.length < 6) window.unshift(1);
+      const avg = window.reduce((s, v) => s + v, 0) / 6;
+      bonus = (bonusNow / (spread ? 12 : 2)) * avg;
+    }
+    out.push({ base: w.state === 'off' ? 0 : w.state === 'rehire' ? w.salary : baseIncome(r, p, m).net, salary: w.salary, benefit: w.benefit, bonus, ratio: w.ratio, state: w.state });
+  }
+  byId.set(p.id, out);
+  return out;
 }
 
 /** 月の収支の内訳のカテゴリ（FP画面の円グラフと同じ） */
@@ -446,7 +521,8 @@ export const cityPlanRateOf = (key: RegionInfo['key'] | null | undefined) => (ke
  */
 export function householdIncomeTax(r: Resolved, m: YM): number {
   const years = Math.max(0, ymYear(m) - ymYear(r.plan.baseYM));
-  const gross = r.people.map((p) => (m < p.retireYM ? p.gross * Math.pow(1 + p.raise, years) : 0));
+  // 昇給が止まる年齢を決めた人は、その後の変化も反映する
+  const gross = r.people.map((p) => (m < p.retireYM ? p.gross * (p.raiseUntilAge == null ? Math.pow(1 + p.raise, years) : raiseFactor(p, r.plan.baseYM, m)) : 0));
   return gross.reduce((t, g, i) => t + residentIncomeTax(g, gross.length > 1 ? gross[1 - i] : null), 0);
 }
 
@@ -529,8 +605,7 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
       from = ym + 1;
     }
   }
-  const ratioHist = new Map<string, number[]>();
-  for (const p of r.people) ratioHist.set(p.id, []);
+  const wages = new Map(r.people.map((p) => [p.id, wageSeries(r, p)] as const));
 
   for (let i = 0; i < n; i++) {
     const m = r.start + i;
@@ -541,25 +616,20 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
 
     let salary = 0, bonus = 0, benefit = 0, pension = 0, retireBonus = 0;
     for (const p of r.people) {
-      const w = workIncome(r, p, m);
-      const hist = ratioHist.get(p.id)!;
-      hist.push(w.ratio);
-      if (hist.length > 6) hist.shift();
+      const w = wages.get(p.id)![i];
       salary += w.salary;
       benefit += w.benefit;
+      bonus += w.bonus;
       const owner: IncomeOwner = p.id === 'self' ? 'self' : 'spouse';
       const who = { who: owner };
-      rec?.add(i, 'income', `salary:${p.id}`, m >= p.retireYM ? `${p.name}の再雇用の給与` : `${p.name}の給与`, w.salary, { sheet: 'income', props: who, work: true, owner });
-      rec?.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true, owner });
-      const spread = !!plan[p.id === 'self' ? 'self' : 'spouse']?.bonusSpread;
-      const bonusNow = m < p.retireYM ? baseIncome(r, p, m).bonus : 0;
-      if ((spread || mon === 6 || mon === 12) && bonusNow > 0) {
-        const window = [...hist];
-        while (window.length < 6) window.unshift(1);
-        const avg = window.reduce((s, v) => s + v, 0) / 6;
-        const b = (bonusNow / (spread ? 12 : 2)) * avg;
-        bonus += b;
-        rec?.add(i, 'income', `bonus:${p.id}`, spread ? `${p.name}の賞与（月々に分けて）` : `${p.name}の賞与`, b, { sheet: 'income', props: who, work: true, owner });
+      if (rec) {
+        // 時短の期間の給与は別の行にして、カット率がわかるようにする
+        const short = w.state === 'short';
+        const cut = Math.round((1 - w.ratio) * 100);
+        rec.add(i, 'income', short ? `salary:${p.id}:short${cut}` : `salary:${p.id}`, w.state === 'rehire' ? `${p.name}の再雇用の給与` : short ? `${p.name}の給与（時短・${cut}%カット）` : `${p.name}の給与`, w.salary, { sheet: short ? 'work' : 'income', props: short ? undefined : who, work: true, owner });
+        rec.add(i, 'income', `benefit:${p.id}`, `${p.name}の育休・時短の給付`, w.benefit, { sheet: 'work', work: true, owner });
+        const spread = !!plan[p.id === 'self' ? 'self' : 'spouse']?.bonusSpread;
+        rec.add(i, 'income', `bonus:${p.id}`, spread ? `${p.name}の賞与（月々に分けて）` : `${p.name}の賞与`, w.bonus, { sheet: 'income', props: who, work: true, owner });
       }
       if (m === p.retireYM) {
         retireBonus += p.retireBonus;
@@ -996,6 +1066,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
     retireIndex: Math.max(0, r.retireAllYM - r.start),
     parts,
     soldYM: sale ? sale.ym : undefined,
+    work: rec ? Object.fromEntries(r.people.map((p) => [p.id === 'self' ? 'self' : 'spouse', wageSeries(r, p)])) : undefined,
   };
 }
 

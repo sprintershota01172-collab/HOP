@@ -120,6 +120,8 @@ export function NumField(props: {
   max?: number;
   text?: boolean;
   required?: boolean;
+  /** 空欄のときの表示（初期値「未設定」） */
+  placeholder?: string;
 }) {
   const sc = props.scale ?? 1;
   const fmt = (v: number) => String(Math.round(v * sc * 1000) / 1000);
@@ -148,7 +150,7 @@ export function NumField(props: {
           inputMode="decimal"
           enterKeyHint="done"
           value={text}
-          placeholder="未設定"
+          placeholder={props.placeholder ?? '未設定'}
           onFocus={() => (focused.current = true)}
           onBlur={(e: FocusEvent) => {
             focused.current = false;

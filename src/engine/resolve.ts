@@ -12,6 +12,10 @@ export interface RPerson {
   bonus: Yen;
   gross: Yen;
   raise: number;
+  /** 昇給が続く年齢。null = 退職まで */
+  raiseUntilAge: number | null;
+  /** 昇給が止まった後の年あたりの変化 */
+  raiseAfter: number;
   retireYM: YM;
   retireAge: number;
   retireBonus: Yen;
@@ -119,6 +123,8 @@ export function resolvePlan(plan: Plan): Resolved {
       bonus,
       gross,
       raise,
+      raiseUntilAge: p.raiseUntilAge ?? null,
+      raiseAfter: p.raiseAfter ?? 0,
       retireAge,
       retireYM: birthYM + retireAge * 12,
       retireBonus: p.retireBonus ?? 0,

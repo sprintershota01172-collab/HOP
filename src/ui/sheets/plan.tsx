@@ -9,17 +9,18 @@ import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../en
 import { CHILD_COST, CHILD_COST_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
 import { NATIONAL, nurseryFee, REGION_KEYS, REGIONS, type RegionKey } from '../../engine/region';
 import { resolvePlan } from '../../engine/resolve';
-import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf } from '../../engine/simulate';
+import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf, wageSeries, type IncomeOwner, type WorkState } from '../../engine/simulate';
 import { marginalTaxRate } from '../../engine/tax';
 import { annuityPayment } from '../../engine/loan';
 import type { Child, Debt, Insurance, Investment, LifeEvent, LivingItem, LivingStd, Owner, Person, Plan, WorkChange } from '../../engine/types';
-import { ageAt, elemStartFY, nowYM, toYM, ymYear } from '../../engine/ym';
+import { ageAt, elemStartFY, nowYM, toYM, ymMonth, ymYear } from '../../engine/ym';
 import { Kpi } from '../components/bits';
+import { PERSON_COLOR, STATE_COLOR, WageChart } from '../components/charts';
 import { MoneyField, NumField, Pager, Seg, TextField, Toggle, useFit, usePages, YMField } from '../components/fields';
 import { ItemList } from '../components/ItemList';
 import { Sheet } from '../components/Sheet';
 import { Switcher } from '../components/Switcher';
-import { pct, yen, ymText } from '../format';
+import { pct, yen, ymShort, ymText } from '../format';
 import { EVENT_ICONS, Icon, LIVING_ICONS } from '../icons';
 import { useStore } from '../store';
 import { LIVING_MARK, MARK } from '../emoji';
@@ -67,7 +68,7 @@ function Paged<T extends string>(props: { pages: { value: T; label: string }[]; 
 }
 
 /* ============================== 収入 ============================== */
-export function IncomeSection({ who: initialWho, page: initialPage }: { who?: Owner; page?: 'income' | 'change' | 'retire' } = {}) {
+export function IncomeSection({ who: initialWho, page: initialPage }: { who?: Owner; page?: 'income' | 'curve' | 'change' | 'retire' } = {}) {
   const { s, p, up } = usePlan();
   const [who, setWho] = useState<Owner>(initialWho === 'spouse' && p.spouse ? 'spouse' : 'self');
   // それぞれの手取り月収（夫婦の収入を見比べられるように、切り替えのボタンに出す）
@@ -101,9 +102,11 @@ export function IncomeSection({ who: initialWho, page: initialPage }: { who?: Ow
             </button>
           </div>
         ) : (
-          <Paged initial={initialPage} pages={[{ value: 'income', label: '収入' }, { value: 'change', label: '収入の変化' }, { value: 'retire', label: '退職・年金' }]}>
+          <Paged initial={initialPage} pages={[{ value: 'income', label: '収入' }, { value: 'curve', label: '給与の推移' }, { value: 'change', label: '収入の変化' }, { value: 'retire', label: '退職・年金' }]}>
             {(page) =>
-              page === 'change' ? (
+              page === 'curve' ? (
+                <WageCurve who={who} person={person} set={set} />
+              ) : page === 'change' ? (
                 <IncomeChanges who={who} person={person} set={set} />
               ) : page === 'income' ? (
                 <>
@@ -116,10 +119,8 @@ export function IncomeSection({ who: initialWho, page: initialPage }: { who?: Ow
                     <MoneyField label="賞与（手取り・年合計）" required per="year" value={person.bonusNetAnnual} onChange={(v) => set((x) => void (x.bonusNetAnnual = v))} />
                     <MoneyField label="額面年収（賞与込み）" required hint="審査の目安・年金の推計" per="year" value={person.grossAnnual} onChange={(v) => set((x) => void (x.grossAnnual = v))} />
                   </div>
-                  <div className="grid2">
-                    <NumField label="昇給率（年）" unit="%" scale={100} value={person.raiseRate} onChange={(v) => set((x) => void (x.raiseRate = v))} hint="未入力は物価並み" />
-                    <Seg label="賞与の計算" value={person.bonusSpread ? 'split' : 'months'} onChange={(v) => set((x) => void (x.bonusSpread = v === 'split'))} options={[{ value: 'months', label: '6・12月' }, { value: 'split', label: '月々に割る' }]} />
-                  </div>
+                  <Seg label="賞与の計算" value={person.bonusSpread ? 'split' : 'months'} onChange={(v) => set((x) => void (x.bonusSpread = v === 'split'))} options={[{ value: 'months', label: '6・12月' }, { value: 'split', label: '月々に割る' }]} />
+                  <div className="micro">昇給率・昇給が止まる年齢は「給与の推移」、育休・時短は「育休・時短」で設定します。</div>
                 </>
               ) : (
                 <>
@@ -156,6 +157,89 @@ export function IncomeSection({ who: initialWho, page: initialPage }: { who?: Ow
     </>
   );
 }
+/** 給与の推移のグラフのデータ（夫婦それぞれの年間の手取りと、毎月の働き方） */
+function wageCurveData(plan: Plan) {
+  const r = resolvePlan(plan);
+  if (!r.people.length) return null;
+  // 年間の値がそろう年だけ: 始まりの年が1月からでなければ翌年から、最後に退職する人が12か月働く最後の年まで
+  const last = Math.min(r.end, Math.max(...r.people.map((q) => Math.max(q.retireYM, q.rehire?.untilYM ?? 0))) - 1);
+  const y0 = ymYear(r.start) + (ymMonth(r.start) > 1 ? 1 : 0);
+  const y1 = ymYear(last) - (ymMonth(last) < 12 ? 1 : 0);
+  const years = Array.from({ length: Math.max(1, y1 - y0 + 1) }, (_, i) => y0 + i);
+  const people = r.people.map((q) => {
+    const ws = wageSeries(r, q);
+    const key: IncomeOwner = q.id === 'self' ? 'self' : 'spouse';
+    // 年間の手取り（給与＋賞与＋給付）
+    const values = years.map((yy) => {
+      let sum = 0;
+      for (let m = Math.max(r.start, toYM(yy, 1)); m <= Math.min(r.end, toYM(yy, 12)); m++) {
+        const w = ws[m - r.start];
+        sum += w.salary + w.benefit + w.bonus;
+      }
+      return sum;
+    });
+    // 働き方の帯（同じ働き方の月をまとめる）
+    const runs: { from: number; to: number; state: WorkState }[] = [];
+    for (let m = Math.max(r.start, toYM(y0, 1)); m <= Math.min(last, toYM(years[years.length - 1], 12)); m++) {
+      const st = ws[m - r.start].state;
+      const t = ymYear(m) + (m % 12) / 12;
+      const prev = runs[runs.length - 1];
+      if (prev && prev.state === st && Math.abs(prev.to - t) < 1e-9) prev.to = t + 1 / 12;
+      else runs.push({ from: t, to: t + 1 / 12, state: st });
+    }
+    // フルタイムの手取り月収: いま・最高（その年齢）・退職の前の月
+    const work = ws.slice(0, Math.max(1, q.retireYM - r.start));
+    let peak = 0, peakAt = r.start;
+    work.forEach((w, i) => {
+      if (w.base > peak + 0.5) (peak = w.base), (peakAt = r.start + i);
+    });
+    return { key, values, runs: runs.filter((x) => x.state !== 'off'), now: ws[0].base, peak, peakAge: ageAt(q.birthYM, peakAt), end: work[work.length - 1].base, has: q.net > 0 };
+  });
+  return { years, people };
+}
+
+/** 給与の推移（給与勾配）: 人ごとの昇給率・昇給が止まる年齢・その後の変化と、夫婦の年間の手取りの推移 */
+function WageCurve({ who, person, set }: { who: Owner; person: Person; set: (fn: (x: Person) => void) => void }) {
+  const { p } = usePlan();
+  const data = useMemo(() => wageCurveData(p), [p]);
+  const me = data?.people.find((x) => x.key === who);
+  const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
+  return (
+    <>
+      <div className="grid3">
+        <NumField label="昇給率（年）" unit="%" scale={100} min={-10} max={20} placeholder="物価並み" value={person.raiseRate} onChange={(v) => set((x) => void (x.raiseRate = v))} />
+        <NumField label="何歳まで昇給" unit="歳" min={20} max={80} placeholder="退職まで" value={person.raiseUntilAge ?? null} onChange={(v) => set((x) => void (x.raiseUntilAge = v == null ? null : Math.round(v)))} />
+        <NumField label="その後（年）" unit="%" scale={100} min={-10} max={10} placeholder="横ばい" value={person.raiseAfter ?? null} onChange={(v) => set((x) => void (x.raiseAfter = v))} />
+      </div>
+      {me && me.has ? (
+        <div className="micro wage-sum">
+          {nm(who)}のフルタイムの手取り月収: いま <b className="num">{yen(me.now)}</b> → 最高 <b className="num">{yen(me.peak)}</b>（{me.peakAge}歳）→ 退職前 <b className="num">{yen(me.end)}</b>
+        </div>
+      ) : (
+        <div className="micro">{nm(who)}の手取り月収を入れると、給与の推移を表示します</div>
+      )}
+      {data && <WageChart years={data.years} lines={data.people.map((x) => ({ key: x.key, values: x.values }))} strips={data.people.map((x) => ({ key: x.key, runs: x.runs }))} sel={who === 'spouse' ? 'spouse' : 'self'} />}
+      <div className="row micro legend-row">
+        {data?.people.map((x) => (
+          <span key={x.key}>
+            <i className="pdot" style={{ background: PERSON_COLOR[x.key] }} />
+            {nm(x.key)}
+          </span>
+        ))}
+        <span>
+          <i className="sw" style={{ background: STATE_COLOR.short }} />
+          時短
+        </span>
+        <span>
+          <i className="sw" style={{ background: STATE_COLOR.leave }} />
+          育休
+        </span>
+        <span className="grow" style={{ justifyContent: 'flex-end' }}>線: 年間の手取り</span>
+      </div>
+    </>
+  );
+}
+
 /** 収入が途中で変わる予定（転職・昇進など）と、定年後の再雇用 */
 function IncomeChanges({ who, person, set }: { who: Owner; person: Person; set: (fn: (x: Person) => void) => void }) {
   const { s, p, up } = usePlan();
@@ -1275,6 +1359,17 @@ function EventLoan({ e, set }: { e: LifeEvent; set: (fn: (x: LifeEvent) => void)
 }
 
 /* ============================== 育休・時短 ============================== */
+/** 期間の表示（2028.04〜2029.03） */
+const workEnd = (w: WorkChange) => (w.type === 'leave' ? w.startYM + w.months - 1 : w.endYM);
+const workPeriod = (w: WorkChange) => `${ymShort(w.startYM)}〜${workEnd(w) != null ? ymShort(workEnd(w)!) : ''}`;
+const workMonths = (w: WorkChange) => {
+  const e = workEnd(w);
+  if (e == null) return '終わりなし';
+  const n = e - w.startYM + 1;
+  return n >= 12 ? `${Math.floor(n / 12)}年${n % 12 ? `${n % 12}か月` : ''}` : `${n}か月`;
+};
+const workCutText = (w: WorkChange) => (w.type === 'leave' ? (w.payRate == null ? '給付は自動' : `${Math.round((1 - w.payRate) * 100)}%カット`) : `時短 ${Math.round((1 - w.ratio) * 100)}%カット`);
+
 export function WorkSection() {
   const { s, p, up } = usePlan();
   const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
@@ -1319,14 +1414,17 @@ function WorkQuick() {
   // 産休＋育休: 出産の前月から、子供が指定の月齢になるまで
   const setMat = (untilMonths: number | null) =>
     up((pl) => {
+      // 期間を変えても、決めたカット率はそのまま
+      const payRate = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity)?.payRate ?? null;
       pl.work = pl.work.filter((w) => !(w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity));
-      if (untilMonths != null) pl.work.push({ id: uid('work'), owner: mom, type: 'leave', startYM: child.birthYM - 1, months: untilMonths + 1, endYM: null, ratio: 1, maternity: true, childId: child.id });
+      if (untilMonths != null) pl.work.push({ id: uid('work'), owner: mom, type: 'leave', startYM: child.birthYM - 1, months: untilMonths + 1, endYM: null, ratio: 1, payRate, maternity: true, childId: child.id });
       fixShort(pl);
     });
   const setPLeave = (months: number | null) =>
     up((pl) => {
+      const payRate = pl.work.find((w) => w.childId === child.id && w.owner === other && w.type === 'leave' && !w.maternity)?.payRate ?? null;
       pl.work = pl.work.filter((w) => !(w.childId === child.id && w.owner === other && w.type === 'leave' && !w.maternity));
-      if (months != null) pl.work.push({ id: uid('work'), owner: other, type: 'leave', startYM: child.birthYM, months, endYM: null, ratio: 1, maternity: false, childId: child.id });
+      if (months != null) pl.work.push({ id: uid('work'), owner: other, type: 'leave', startYM: child.birthYM, months, endYM: null, ratio: 1, payRate, maternity: false, childId: child.id });
     });
   // 時短: 育休が終わった月から、指定の時期まで。勤務時間（1日8時間に対する割合）で給与の割合を決める
   const leaveEnd = (pl: Plan) => {
@@ -1340,11 +1438,12 @@ function WorkQuick() {
   const setShort = (until: 'none' | 'age3' | 'school', hours?: number) =>
     up((pl) => {
       const cur = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'short');
-      const h = hours ?? (cur ? Math.round(cur.ratio * 8) : 6);
+      // 期間を変えても、決めたカット率（給与の割合）はそのまま
+      const ratio = hours != null ? hours / 8 : cur ? cur.ratio : 0.75;
       pl.work = pl.work.filter((w) => w !== cur);
       if (until === 'none') return;
       const end = until === 'age3' ? child.birthYM + 36 - 1 : toYM(elemStartFY(child.birthYM), 3);
-      pl.work.push({ id: uid('work'), owner: mom, type: 'short', startYM: leaveEnd(pl), months: 0, endYM: end, ratio: h / 8, maternity: false, childId: child.id });
+      pl.work.push({ id: uid('work'), owner: mom, type: 'short', startYM: leaveEnd(pl), months: 0, endYM: end, ratio, maternity: false, childId: child.id });
     });
   const matMonths = matLeave ? matLeave.months - 1 : null;
   const shortUntil = !short ? 'none' : short.endYM != null && short.endYM <= child.birthYM + 36 ? 'age3' : 'school';
@@ -1353,36 +1452,53 @@ function WorkQuick() {
       {label}
     </button>
   );
+  // 見出しの右に期間を出し、タップで月単位の期間・カット率を開く
+  const head = (label: string, w: WorkChange | undefined) => (
+    <span className="fhead">
+      <span className="ellipsis">{label}</span>
+      {w && (
+        <button className="linkbtn" onClick={() => s.open({ kind: 'workEdit', props: { id: w.id } })} aria-label={`${label}の期間とカット率`}>
+          {workPeriod(w)}
+          <Icon name="right" />
+        </button>
+      )}
+    </span>
+  );
+  const setLeaveCut = (v: number | null) => up((pl) => void pl.work.filter((w) => w.childId === child.id && w.owner === mom && w.type === 'leave').forEach((w) => (w.payRate = v == null ? null : 1 - v)));
+  const setShortCut = (v: number | null) => up((pl) => void pl.work.filter((w) => w.childId === child.id && w.owner === mom && w.type === 'short').forEach((w) => (w.ratio = 1 - (v ?? 0.25))));
   return (
     <>
       {p.children.length > 1 && <Seg label="対象の子供" value={child.id} onChange={setCid} options={p.children.map((c) => ({ value: c.id, label: c.name }))} />}
       {p.spouse && <Seg label="出産する人" value={mom} onChange={setMom} options={[{ value: 'spouse', label: nm('spouse') }, { value: 'self', label: nm('self') }]} />}
       <div className="field">
-        <span>{nm(mom)}の産休＋育休（子供が何か月まで）</span>
+        {head(`${nm(mom)}の産休＋育休`, matLeave)}
         <div className="chips">
           {[[null, 'なし'], [6, '6か月'], [12, '1歳'], [18, '1歳半'], [24, '2歳']].map(([v, l]) => chip(matMonths === v || (v === null && matMonths === null), l as string, () => setMat(v as number | null)))}
         </div>
       </div>
       {p.spouse && (
         <div className="field">
-          <span>{nm(other)}の育休（生まれた月から）</span>
+          {head(`${nm(other)}の育休`, pLeave)}
           <div className="chips">
             {[[null, 'なし'], [1, '1か月'], [3, '3か月'], [6, '6か月'], [12, '1年']].map(([v, l]) => chip((pLeave?.months ?? null) === v, l as string, () => setPLeave(v as number | null)))}
           </div>
         </div>
       )}
       <div className="field">
-        <span>{nm(mom)}の復帰後の時短勤務</span>
+        {head(`${nm(mom)}の時短勤務`, short)}
         <div className="chips">
           {chip(shortUntil === 'none', 'なし', () => setShort('none'))}
           {chip(shortUntil === 'age3', '3歳まで', () => setShort('age3'))}
           {chip(shortUntil === 'school', '小学校入学まで', () => setShort('school'))}
         </div>
       </div>
-      {short && (
-        <Seg label="時短の勤務時間（給与はフルタイム8時間に対する割合）" value={Math.round(short.ratio * 8)} onChange={(h) => setShort(shortUntil, h)} options={[{ value: 4, label: '4時間 50%' }, { value: 5, label: '5時間 63%' }, { value: 6, label: '6時間 75%' }, { value: 7, label: '7時間 88%' }]} />
+      {(matLeave || short) && (
+        <div className="grid2">
+          {matLeave && <NumField label="育休中の収入カット率" unit="%" scale={100} min={0} max={100} placeholder="自動" value={matLeave.payRate == null ? null : 1 - matLeave.payRate} onChange={setLeaveCut} />}
+          {short && <NumField label="時短の給与カット率" unit="%" scale={100} min={0} max={90} nullable={false} value={1 - short.ratio} onChange={setShortCut} />}
+        </div>
       )}
-      <div className="micro" style={{ lineHeight: 1.5 }}>給付は自動で計算: 産休は給与の2/3、育休は6か月まで67%・以降50%（両親とも育休なら最初の28日は+13%）、時短は2歳まで賃金の10%。</div>
+      <div className="micro" style={{ lineHeight: 1.5 }}>カット率は手取り月収に対して。育休が空欄なら法定の給付（6か月まで手取りの約84%・以降約63%）で計算。期間は › から月単位で変えられます。</div>
     </>
   );
 }
@@ -1393,7 +1509,7 @@ function WorkList({ nm, add }: { nm: (o: Owner) => string; add: (type: WorkChang
     <>
       <ItemList
         per={3}
-        rows={p.work.map((w) => ({ id: w.id, icon: w.type === 'leave' ? 'baby' : 'briefcase', title: `${nm(w.owner)}の${w.type === 'leave' ? '育児休業' : '時短勤務'}`, sub: w.type === 'leave' ? `${ymText(w.startYM)}から${w.months}か月${w.maternity ? '（産休含む）' : ''}` : `${ymText(w.startYM)}〜${w.endYM ? ymText(w.endYM) : ''}・勤務${Math.round(w.ratio * 100)}%` }))}
+        rows={p.work.map((w) => ({ id: w.id, icon: w.type === 'leave' ? 'baby' : 'briefcase', title: `${nm(w.owner)}の${w.type === 'leave' ? '育児休業' : '時短勤務'}`, sub: `${workPeriod(w)}（${workMonths(w)}）・${workCutText(w)}${w.type === 'leave' && w.maternity ? '・産休含む' : ''}` }))}
         onPick={(id) => s.open({ kind: 'workEdit', props: { id } })}
         empty="育休・時短の予定があれば登録します（収入の減少と給付を月ごとに計算）"
       />
@@ -1427,19 +1543,43 @@ export function WorkEditSheet({ close, props }: SheetProps) {
       {p.spouse && <Seg label="誰が" value={w.owner} onChange={(v) => set((x) => void (x.owner = v))} options={[{ value: 'self', label: p.self.name || '本人' }, { value: 'spouse', label: p.spouse.name || '配偶者' }]} />}
       <Seg label="種類" value={w.type} onChange={(v) => set((x) => void (x.type = v))} options={[{ value: 'leave', label: '育休・産休' }, { value: 'short', label: '時短勤務' }]} />
       <div className="grid2">
-        <YMField label="始まり" nullable={false} value={w.startYM} onChange={(v) => v != null && set((x) => void (x.startYM = v))} from={THIS_YEAR - 1} to={THIS_YEAR + 30} />
+        <YMField
+          label="始まり"
+          nullable={false}
+          value={w.startYM}
+          onChange={(v) =>
+            v != null &&
+            set((x) => {
+              // 終わりの月は変えずに、始まりだけを動かす
+              const end = x.type === 'leave' ? x.startYM + x.months - 1 : x.endYM;
+              x.startYM = v;
+              if (x.type === 'leave' && end != null) x.months = Math.max(1, end - v + 1);
+            })
+          }
+          from={THIS_YEAR - 1}
+          to={THIS_YEAR + 30}
+        />
         {w.type === 'leave' ? (
-          <NumField label="期間" unit="か月" nullable={false} min={1} max={36} value={w.months} onChange={(v) => set((x) => void (x.months = Math.round(v ?? 12)))} />
+          <YMField label="終わり" hint={workMonths(w)} nullable={false} value={w.startYM + w.months - 1} onChange={(v) => v != null && set((x) => void (x.months = Math.max(1, Math.min(48, v - x.startYM + 1))))} from={THIS_YEAR - 1} to={THIS_YEAR + 33} />
         ) : (
-          <YMField label="終わり" value={w.endYM} onChange={(v) => set((x) => void (x.endYM = v))} from={THIS_YEAR - 1} to={THIS_YEAR + 40} />
+          <YMField label="終わり" hint={workMonths(w)} value={w.endYM} onChange={(v) => set((x) => void (x.endYM = v))} from={THIS_YEAR - 1} to={THIS_YEAR + 40} />
         )}
       </div>
       {w.type === 'leave' ? (
-        <Toggle label="産前産後休業を含む" hint="最初の3か月を出産手当金（賃金の2/3）として計算" value={w.maternity} onChange={(v) => set((x) => void (x.maternity = v))} />
+        <>
+          <NumField label="育休中の収入カット率" unit="%" scale={100} min={0} max={100} placeholder="自動（法定の給付）" value={w.payRate == null ? null : 1 - w.payRate} onChange={(v) => set((x) => void (x.payRate = v == null ? null : 1 - v))} />
+          <div className="micro" style={{ lineHeight: 1.5 }}>
+            {w.payRate == null ? '空欄は法定の給付（産休は手取りの約83%、育休は6か月まで約84%・以降約63%）で計算' : `期間を通して手取りの${Math.round(w.payRate * 100)}%を受け取る計算です（空欄に戻すと法定の給付）`}
+          </div>
+          <Toggle label="産前産後休業を含む" hint="最初の3か月を出産手当金（賃金の2/3）として計算" value={w.maternity} onChange={(v) => set((x) => void (x.maternity = v))} />
+        </>
       ) : (
         <>
-          <Seg label="1日の勤務時間（フルタイム8時間）" value={Math.round(w.ratio * 8 * 2) / 2} onChange={(h) => set((x) => void (x.ratio = h / 8))} options={[4, 5, 6, 7].map((h) => ({ value: h, label: `${h}時間` }))} />
-          <NumField label="給与の割合（自動）" unit="%" scale={100} nullable={false} min={10} max={100} value={w.ratio} onChange={(v) => set((x) => void (x.ratio = v ?? 1))} hint="勤務時間から計算。直接も変えられます" />
+          <div className="grid2">
+            <NumField label="給与のカット率" unit="%" scale={100} nullable={false} min={0} max={90} value={1 - w.ratio} onChange={(v) => set((x) => void (x.ratio = 1 - (v ?? 0)))} />
+            <NumField label="1日の勤務時間" unit="時間" nullable={false} min={1} max={8} value={Math.round(w.ratio * 8 * 10) / 10} onChange={(h) => set((x) => void (x.ratio = Math.max(0.1, Math.min(1, (h ?? 8) / 8))))} />
+          </div>
+          <div className="micro">勤務時間を入れると、8時間に対する割合でカット率を計算します（6時間 → 25%カット）</div>
         </>
       )}
       {p.children.length > 0 && (

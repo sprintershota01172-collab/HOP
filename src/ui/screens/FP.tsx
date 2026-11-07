@@ -100,8 +100,9 @@ function Result() {
   const cur: Sel = sel ?? biggest;
   const curSlice = cur === 'income' ? null : pie.slices.find((x) => x.key === cur)!;
   const names = splitNames(vm.people);
-  // 年の収支: 夫婦それぞれの年間の収入
-  const yearSplit = entry.list.find((x) => x.kind === 'avg')?.splitSum ?? [];
+  // 年の収支: 夫婦それぞれの年間の収入と働き方
+  const yearPie = entry.list.find((x) => x.kind === 'avg');
+  const yearSplit = yearPie?.splitSum ?? [];
   return (
     <>
       <div className="row" style={{ flex: 'none' }}>
@@ -169,7 +170,7 @@ function Result() {
               {/* 円グラフと夫婦それぞれの収入。タップすると下に収入の内訳を出す */}
               <button className="donut-col" aria-pressed={cur === 'income' ? 'true' : 'false'} onClick={() => setSel('income')} aria-label="収入の内訳を見る">
                 <Donut slices={pie.slices} income={pie.income} sel={cur === 'income' ? null : cur} size={typeof window !== 'undefined' && window.innerHeight <= 700 ? 98 : 132} />
-                <IncomeSplit items={pie.split} names={names} />
+                <IncomeSplit items={pie.split} names={names} work={pie.work} />
               </button>
               <div className="legend" role="tablist" aria-label="内訳を見る項目">
                 {pie.slices.map((x) => (
@@ -210,7 +211,7 @@ function Result() {
               <Kpi mark={MARK.saved} label="貯金・積立・投資" v={yr.contrib + yr.fund + yr.save} />
               <Kpi mark={MARK.worth} label="年間収支" v={yr.net} sign />
             </div>
-            {yearSplit.length > 0 && <IncomeSplit wide items={yearSplit} names={names} />}
+            {yearSplit.length > 0 && <IncomeSplit wide items={yearSplit} names={names} work={yearPie?.work} />}
             <YearBars years={fp.years} year={year} onPick={setYear} retireYear={retireY} />
             {fp.goals.length > 0 && (
               <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>

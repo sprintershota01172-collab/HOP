@@ -32,6 +32,10 @@ export interface Person {
   grossAnnual: Yen | null;
   /** 昇給率（名目・年）。毎年4月に反映 */
   raiseRate: Rate | null;
+  /** 何歳まで昇給するか（この年齢の間に迎える4月までは昇給し、その後は raiseAfter）。null = 退職まで昇給 */
+  raiseUntilAge?: Age | null;
+  /** 昇給が止まった後の年あたりの変化（−0.01 = 毎年1%ずつ下がる）。null = 横ばい */
+  raiseAfter?: Rate | null;
   retireAge: Age | null;
   /** 退職金（手取り） */
   retireBonus: Yen | null;
@@ -183,8 +187,10 @@ export interface WorkChange {
   months: number;
   /** short: 終了（この月まで） */
   endYM: YM | null;
-  /** short: 勤務時間の割合（0.5 = 半分） */
+  /** short: 給与の割合（0.75 = 25%カット） */
   ratio: number;
+  /** leave: 育休中に受け取る手取りの割合（給付込み。0.7 = 30%カット）。null・未設定 = 法定の給付で自動計算 */
+  payRate?: number | null;
   /** leave: 産前産後休業を含む（最初の3か月を出産手当金とみなす） */
   maternity: boolean;
   /** 給付対象の子（時短の2歳未満判定に使う） */

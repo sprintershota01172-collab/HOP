@@ -237,6 +237,42 @@ export interface MonthPie {
   split: SplitItem[];
   /** 期間の収入の持ち主別の合計（年平均の場合は年の合計。合計 = その期間の収入の合計） */
   splitSum: SplitItem[];
+  /** 人ごとの働き方（その期間に、フルタイム・時短・育休だった月数とカット率） */
+  work: Partial<Record<IncomeOwner, WorkTag>>;
+}
+
+/** 期間中の働き方の内訳（月数）。カット率は手取り月収（フルタイム）に対して減った割合 */
+export interface WorkTag {
+  months: number;
+  full: number;
+  short: number;
+  leave: number;
+  rehire: number;
+  off: number;
+  /** 時短の月のカット率（期間中で最も大きいもの。給付は含めない） */
+  shortCut: number;
+  /** 育休の月の平均のカット率（給付を受け取った後） */
+  leaveCut: number;
+}
+
+/** 指定した月の、人ごとの働き方 */
+export function workTags(sim: SimResult, idx: number[]): Partial<Record<IncomeOwner, WorkTag>> {
+  const out: Partial<Record<IncomeOwner, WorkTag>> = {};
+  for (const [owner, list] of Object.entries(sim.work ?? {}) as [IncomeOwner, NonNullable<SimResult['work']>[IncomeOwner]][]) {
+    if (!list) continue;
+    const t: WorkTag = { months: idx.length, full: 0, short: 0, leave: 0, rehire: 0, off: 0, shortCut: 0, leaveCut: 0 };
+    let leaveCut = 0;
+    for (const i of idx) {
+      const w = list[i];
+      if (!w) continue;
+      t[w.state]++;
+      if (w.state === 'short') t.shortCut = Math.max(t.shortCut, 1 - w.ratio);
+      if (w.state === 'leave' && w.base > 0) leaveCut += 1 - (w.salary + w.benefit) / w.base;
+    }
+    t.leaveCut = t.leave ? leaveCut / t.leave : 0;
+    out[owner] = t;
+  }
+  return out;
 }
 
 /** 指定した月の収入を持ち主別に合計し、円単位に丸める（丸めの差は最も大きい持ち主で調整して total に合わせる） */
@@ -271,7 +307,7 @@ export function monthPies(sim: SimResult, years: YearRow[]): MonthPie[][] {
       const yy = toYears({ ...sim, rows: idx.map((i) => sim.rows[i]) })[0];
       const p = monthPie(yy);
       const detail = detailOf(sim, idx, yy);
-      return { kind, months: idx.length, ...p, detail, split: splitOf(detail.income), splitSum: splitTotal(sim, idx, yy.income) };
+      return { kind, months: idx.length, ...p, detail, split: splitOf(detail.income), splitSum: splitTotal(sim, idx, yy.income), work: workTags(sim, idx) };
     };
     const isBonusMonth = (i: number) => {
       const mon = (sim.rows[i].ym % 12) + 1;

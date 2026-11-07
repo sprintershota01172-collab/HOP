@@ -454,14 +454,35 @@ describe('入力・保存・再計算', () => {
     assert.equal(await field('産休＋育休').locator('.chip.on').textContent(), '1歳半');
     await field('時短勤務').locator('.chip:has-text("3歳まで")').click();
     await page.waitForTimeout(300);
-    await sheet().locator('.seg button:has-text("5時間")').click();
+    // カット率: 時短は給与の、育休は手取りの（空欄は法定の給付）
+    const cutShort = sheet().locator('.field:has-text("時短の給与カット率") input').first();
+    await cutShort.fill('40');
+    await cutShort.press('Enter');
+    const cutLeave = sheet().locator('.field:has-text("育休中の収入カット率") input').first();
+    await cutLeave.fill('30');
+    await cutLeave.press('Enter');
     await page.waitForTimeout(300);
+    // 時短の期間を変えても、決めたカット率はそのまま
+    await field('時短勤務').locator('.chip:has-text("小学校入学まで")').click();
+    await page.waitForTimeout(300);
+    assert.equal(await cutShort.inputValue(), '40');
     assert.ok((await sheetOverflow(page)) <= 1, '育休・時短のかんたん設定');
+    // 見出しの期間 → 月単位の期間とカット率
+    assert.match(await field('産休＋育休').locator('.linkbtn').textContent(), /^\d{4}\.\d{2}〜\d{4}\.\d{2}$/);
+    await field('時短勤務').locator('.linkbtn').click();
+    await page.waitForTimeout(400);
+    assert.equal(await sheet().locator('h2').textContent(), '時短勤務');
+    assert.equal(await sheet().locator('.field:has-text("給与のカット率") input').first().inputValue(), '40');
+    assert.ok((await sheetOverflow(page)) <= 1, '時短勤務の設定');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await field('時短勤務').locator('.chip:has-text("3歳まで")').click();
+    await page.waitForTimeout(300);
     await sheet().locator('.seg button:has-text("登録した予定")').click();
     await page.waitForTimeout(400);
     const list = await sheet().locator('.pane:not(.out)').last().textContent();
-    assert.match(list, /時短勤務.*勤務63%/);
-    assert.match(list, /19か月（産休含む）/);
+    assert.match(list, /時短勤務.*時短 40%カット/);
+    assert.match(list, /1年7か月）・30%カット・産休含む/);
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
     // 車の買い替え → ローン
@@ -571,6 +592,43 @@ describe('入力・保存・再計算', () => {
     await page.waitForSelector('.incsplit.wide');
     const shares = await page.$$eval('.incsplit.wide .w small', (els) => els.map((e) => parseInt(e.textContent, 10)));
     assert.ok(Math.abs(shares.reduce((t, v) => t + v, 0) - 100) <= 2, shares.join(','));
+    await ctx.close();
+  });
+
+  it('給与の推移: 夫婦それぞれの昇給率・昇給が止まる年齢を設定でき、グラフと時短・育休の時期が出る。月の収支に働き方のしるし', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    await page.click('nav button:nth-child(2)');
+    await page.waitForSelector('.donut-col .wb');
+    const marks = await page.$$eval('.donut-col .wb', (els) => els.map((e) => e.textContent));
+    assert.ok(marks.every((t) => ['フル', '時短', '育休', '再雇用'].includes(t)) && marks.length === 2, marks.join(','));
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("収入")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("給与の推移")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await sheet().locator('.chart polyline').count(), 2, '夫婦2本の線');
+    assert.ok((await sheet().locator('.chart rect').count()) >= 2, '時短・育休の時期の帯');
+    const before = await sheet().locator('.wage-sum').textContent();
+    const age = sheet().locator('.field:has-text("何歳まで昇給") input').first();
+    await age.fill('45');
+    await age.press('Enter');
+    const after = sheet().locator('.field:has-text("その後") input').first();
+    await after.fill('-1');
+    await after.press('Enter');
+    await page.waitForTimeout(400);
+    const now = await sheet().locator('.wage-sum').textContent();
+    assert.notEqual(now, before);
+    assert.match(now, /（45歳）/, '最高は昇給が止まる年齢');
+    assert.ok((await sheetOverflow(page)) <= 1, '給与の推移');
+    // 配偶者に切り替えると、配偶者の設定（本人の設定は残る）
+    await sheet().locator('.seg button:has-text("はなこ")').click();
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("給与の推移")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await sheet().locator('.field:has-text("何歳まで昇給") input').first().inputValue(), '');
+    assert.match(await sheet().locator('.wage-sum').textContent(), /^はなこ/);
     await ctx.close();
   });
 

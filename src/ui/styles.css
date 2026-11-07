@@ -148,7 +148,13 @@
   .app .donut-wrap { position: relative; }
   .app .donut-col { position: absolute; right: 0; bottom: 0; width: calc(50% - 5px); height: 18px; padding: 0 6px; flex-direction: row; align-items: center; border-radius: 8px; }
   .app .donut-col > svg, .app .incsplit .bar, .app .incsplit .w .nm, .app .incsplit .w.k-other { display: none; }
-  .app .incsplit .who { flex-direction: row; gap: 8px; }
+  .app .incsplit .who { flex-direction: row; gap: 6px; }
+  .app .incsplit .w { gap: 3px; min-width: 0; flex: none; }
+  .app .incsplit .w b { font-size: 10.5px; }
+  .app .incsplit .who { overflow: hidden; }
+  .app .donut-col { min-width: 0; }
+  /* 狭い枠では「フル」を省き、時短・育休だけ示す */
+  .app .donut-col .wb.wb-full { display: none; }
   .app .legend { grid-template-columns: 1fr 1fr; column-gap: 10px; }
   .app .loan-sub .card.item { padding: 3px 10px !important; }
   .app .loan-sub .grow { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
@@ -174,6 +180,7 @@
   .app .incsplit { gap: 3px; }
   .app .incsplit .bar { height: 4px; }
   .app .incsplit .w { line-height: 13px; }
+  .app .wb { padding: 1px 3px; }
   .app .legend { gap: 0; }
   .app .legend button.li { min-height: 22px; padding: 1px 6px; }
   .app .wf .ln { padding: 3px 0; }
@@ -543,9 +550,27 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .incsplit .w small { flex: none; color: var(--ink-3); font-size: 10.5px; }
 .incsplit.wide { flex: none; gap: 5px; }
 .incsplit.wide .bar { height: 8px; border-radius: 4px; }
-.incsplit.wide .who { flex-direction: row; gap: 4px 12px; flex-wrap: wrap; }
-.incsplit.wide .w { flex: 0 1 auto; font-size: var(--fs-s); }
+.incsplit.wide .who { flex-direction: column; gap: 2px; }
+.incsplit.wide .w { font-size: var(--fs-s); gap: 6px; }
 .incsplit.wide .w .nm { flex: 0 1 auto; }
+.incsplit.wide .w b { margin-left: auto; }
+.incsplit.wide .w small { width: 30px; text-align: right; }
+/* 働き方のしるし（フル・時短・育休・再雇用） */
+.wb { font-style: normal; flex: none; font-size: 10px; font-weight: 700; line-height: 1; padding: 2px 4px; border-radius: 4px; white-space: nowrap; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
+.wb.wb-short { background: var(--warn-soft); color: var(--warn); box-shadow: none; }
+.wb.wb-leave { background: var(--green-soft); color: var(--green-2); box-shadow: none; }
+.incsplit.wide .wb { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; }
+.donut-col { min-width: 140px; }
+/* 見出しの右に期間（タップで細かく設定） */
+.fhead { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.linkbtn { flex: none; border: 0; background: transparent; padding: 0; margin: 0; font: inherit; font-size: var(--fs-xs); font-weight: 700; color: var(--green-2); display: inline-flex; align-items: center; gap: 1px; font-family: var(--num); }
+.linkbtn svg { width: 13px; height: 13px; }
+.wage-sum { line-height: 1.5; }
+.wage-sum b { color: var(--ink); }
+.legend-row { gap: 10px; flex-wrap: wrap; flex: none; }
+.legend-row > span { display: inline-flex; align-items: center; gap: 4px; }
+.legend-row .pdot { width: 8px; height: 8px; }
+.legend-row .sw { width: 14px; height: 6px; border-radius: 2px; display: inline-block; }
 .wf .ln .op .pdot { vertical-align: 1px; }
 .seg button .pdot { margin-right: 5px; vertical-align: 1px; }
 .seg button small { font-weight: 600; font-size: var(--fs-xs); color: var(--ink-3); }

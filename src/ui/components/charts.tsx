@@ -1,5 +1,6 @@
 import React from 'react';
-import type { PieSlice, SplitItem, SplitKey, YearRow } from '../../engine/aggregate';
+import type { PieSlice, SplitItem, SplitKey, WorkTag, YearRow } from '../../engine/aggregate';
+import type { IncomeOwner, WorkState } from '../../engine/simulate';
 import { yen } from '../format';
 import { useSize } from './fields';
 
@@ -16,31 +17,138 @@ export const SLICE_COLOR: Record<PieSlice['key'], string> = {
 /** 収入の持ち主の色（本人・配偶者・世帯の収入） */
 export const PERSON_COLOR: Record<SplitKey, string> = { self: 'var(--c-self)', spouse: 'var(--c-spouse)', other: 'var(--c-shared)' };
 
+/** 働き方のしるしの色分け */
+export type WorkBadgeKind = 'full' | 'short' | 'leave' | 'rehire';
+const BADGE_SHORT: Record<WorkBadgeKind, string> = { full: 'フル', short: '時短', leave: '育休', rehire: '再雇用' };
+
 /**
- * 夫婦それぞれの収入（と児童手当などの世帯の収入）の内訳。割合の帯と、名前・金額の行。
- * wide: 横1行に並べ、割合も出す（年の収支用）
+ * その期間の働き方のしるし。短い形は、いちばん長かった働き方（同じなら 育休 → 時短 → 再雇用 → フル の順）。
+ * 長い形（年の収支）は「育休3か月・時短9か月 50%カット」のように全部を書く。給与のない人（退職後など）は null
  */
-export function IncomeSplit({ items, names, wide }: { items: SplitItem[]; names: Record<SplitKey, string>; wide?: boolean }) {
+export function workBadge(t: WorkTag | undefined, long = false): { kind: WorkBadgeKind; text: string; full: string } | null {
+  if (!t) return null;
+  const order: [WorkBadgeKind, number][] = [['leave', t.leave], ['short', t.short], ['rehire', t.rehire], ['full', t.full]];
+  if (!order.some(([, n]) => n > 0)) return null;
+  const kind = order.reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+  const cut = (v: number) => `${Math.round(v * 100)}%カット`;
+  const months = (n: number) => (n < t.months ? `${n}か月` : '');
+  const parts: string[] = [];
+  if (t.leave) parts.push(`育休${months(t.leave)}`);
+  if (t.short) parts.push(`時短${months(t.short)} ${cut(t.shortCut)}`);
+  if (t.rehire) parts.push('再雇用');
+  if (!parts.length) parts.push('フルタイム');
+  const full = parts.join('・');
+  return { kind, text: long ? full : BADGE_SHORT[kind], full };
+}
+
+/**
+ * 夫婦それぞれの収入（と児童手当などの世帯の収入）の内訳。割合の帯と、名前・働き方・金額の行。
+ * wide: 1人1行で、働き方を詳しく書き、割合も出す（年の収支用）
+ */
+export function IncomeSplit({ items, names, wide, work }: { items: SplitItem[]; names: Record<SplitKey, string>; wide?: boolean; work?: Partial<Record<IncomeOwner, WorkTag>> }) {
   const total = items.reduce((t, x) => t + Math.max(0, x.value), 0);
   const share = (v: number) => (total > 0 ? Math.round((Math.max(0, v) / total) * 100) : 0);
+  const badge = (k: SplitKey) => (k === 'other' ? null : workBadge(work?.[k], wide));
   return (
-    <div className={`incsplit${wide ? ' wide' : ''}`} aria-label={`収入の内訳: ${items.map((x) => `${names[x.key]} ${yen(x.value)}`).join('、')}`}>
+    <div className={`incsplit${wide ? ' wide' : ''}`} aria-label={`収入の内訳: ${items.map((x) => `${names[x.key]}${badge(x.key) ? `（${badge(x.key)!.full}）` : ''} ${yen(x.value)}`).join('、')}`}>
       <div className="bar" aria-hidden="true">
         {items.map((x) => x.value > 0 && <i key={x.key} style={{ width: `${(x.value / Math.max(1, total)) * 100}%`, background: PERSON_COLOR[x.key] }} />)}
       </div>
       <div className="who" aria-hidden="true">
-        {items.map((x) => (
-          <span key={x.key} className={`w k-${x.key}`}>
-            <i style={{ background: PERSON_COLOR[x.key] }} />
-            <span className="nm">{names[x.key]}</span>
-            <b className="num">{yen(x.value)}</b>
-            {wide && <small className="num">{share(x.value)}%</small>}
-          </span>
-        ))}
+        {items.map((x) => {
+          const b = badge(x.key);
+          return (
+            <span key={x.key} className={`w k-${x.key}`}>
+              <i style={{ background: PERSON_COLOR[x.key] }} />
+              <span className="nm">{names[x.key]}</span>
+              {b && (
+                <em className={`wb wb-${b.kind}`} title={b.full}>
+                  {b.text}
+                </em>
+              )}
+              <b className="num">{yen(x.value)}</b>
+              {wide && <small className="num">{share(x.value)}%</small>}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
 }
+
+/** 働き方の帯の色（給与の推移のグラフ） */
+export const STATE_COLOR: Record<WorkState, string> = { full: 'var(--surface-2)', short: 'var(--warn)', leave: 'var(--green-2)', rehire: 'var(--c-shared)', off: 'transparent' };
+
+/**
+ * 夫婦それぞれの年間の手取り（給与・賞与・給付）の推移と、その下に働き方の帯（時短・育休の時期）。
+ * 選んだ人の線を太く、もう1人を薄く描く
+ */
+export function WageChart({ years, lines, strips, sel }: { years: number[]; lines: { key: IncomeOwner; values: number[] }[]; strips: { key: IncomeOwner; runs: { from: number; to: number; state: WorkState }[] }[]; sel: IncomeOwner }) {
+  const { ref, w, h } = useSize<HTMLDivElement>();
+  const strip = 6;
+  const pad = { l: 38, r: 8, t: 8, b: 16 + strips.length * (strip + 3) + 2 };
+  const iw = Math.max(1, w - pad.l - pad.r);
+  const ih = Math.max(1, h - pad.t - pad.b);
+  const max = Math.max(1, ...lines.flatMap((l) => l.values));
+  const step = niceStep(max / 3);
+  const top = Math.ceil(max / step) * step;
+  // 横軸は「最初の年の1月 〜 最後の年の12月」。年の値は年の真ん中に、帯は月の位置（年 + 月/12）に描く
+  const span = Math.max(1, years.length);
+  const xm = (t: number) => pad.l + ((t - years[0]) / span) * iw;
+  const x = (i: number) => xm(years[0] + i + 0.5);
+  const y = (v: number) => pad.t + ih - (v / top) * ih;
+  const ticks = years.filter((yy, i) => i === 0 || (yy - years[0]) % (years.length > 30 ? 10 : 5) === 0);
+  const order = [...lines.filter((l) => l.key !== sel), ...lines.filter((l) => l.key === sel)];
+  return (
+    <div ref={ref} className="fill" style={{ minHeight: 90 }}>
+      {w > 0 && h > 0 && (
+        <svg className="chart" width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label="年間の手取りの推移と働き方">
+          {Array.from({ length: Math.round(top / step) + 1 }, (_, k) => k * step).map((v) => (
+            <g key={v}>
+              <line x1={pad.l} x2={w - pad.r} y1={y(v)} y2={y(v)} stroke="var(--line)" strokeWidth={1} />
+              <text x={pad.l - 4} y={y(v) + 3} textAnchor="end">
+                {Math.round(v / 10_000)}万
+              </text>
+            </g>
+          ))}
+          {order.map((l) => (
+            <polyline
+              key={l.key}
+              fill="none"
+              stroke={PERSON_COLOR[l.key]}
+              strokeWidth={l.key === sel ? 2.5 : 1.5}
+              strokeOpacity={l.key === sel ? 1 : 0.45}
+              strokeLinejoin="round"
+              points={l.values.map((v, i) => `${x(i)},${y(v)}`).join(' ')}
+            />
+          ))}
+          {strips.map((s, k) => {
+            const sy = pad.t + ih + 4 + k * (strip + 3);
+            return (
+              <g key={s.key} opacity={s.key === sel ? 1 : 0.55}>
+                <circle cx={pad.l - 8} cy={sy + strip / 2} r={3} fill={PERSON_COLOR[s.key]} />
+                {s.runs.map((r, j) => (
+                  <rect key={j} x={xm(r.from)} y={sy} width={Math.max(1, xm(r.to) - xm(r.from))} height={strip} rx={1.5} fill={STATE_COLOR[r.state]} />
+                ))}
+              </g>
+            );
+          })}
+          {ticks.map((yy) => (
+            <text key={yy} x={x(years.indexOf(yy))} y={h - 3} textAnchor="middle">
+              {yy}
+            </text>
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+const niceStep = (v: number) => {
+  const p = Math.pow(10, Math.floor(Math.log10(Math.max(1, v))));
+  const m = v / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 2.5 ? 2.5 : m <= 5 ? 5 : 10) * p;
+};
 
 /** 月の収支の円グラフ。大きさは項目数に関係なく固定 */
 export function Donut({ slices, income, size = 132, sel }: { slices: PieSlice[]; income: number; size?: number; sel?: PieSlice['key'] | null }) {
