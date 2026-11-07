@@ -595,6 +595,47 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('育休・時短: 追加しても同じ人の育休は2件にならず、重なったときは1件にまとめられる', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    const sheet = () => page.locator('.sheet:not(.closing)').last();
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("育休・時短")');
+    await page.waitForTimeout(400);
+    await sheet().locator('.seg button:has-text("登録した予定")').click();
+    await page.waitForTimeout(400);
+    // 配偶者の育休はもうある → 追加はもう1人（たろう）の育休
+    await sheet().locator('.btn:has-text("育休・産休")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await sheet().locator('h2').textContent(), '育児休業');
+    assert.equal(await sheet().locator('.seg button[aria-pressed="true"]').first().textContent(), 'たろう');
+    // 「誰が」をはなこに変えると、はなこの育休と重なる → 1件にまとめる（2件にしない）
+    await sheet().locator('.seg button:has-text("はなこ")').first().click();
+    await page.waitForTimeout(400);
+    await page.locator('text=1件にまとめました').first().waitFor();
+    assert.equal(await sheet().locator('.dupbar').count(), 0);
+    assert.ok((await sheetOverflow(page)) <= 1);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    const text = await sheet().locator('.pane:not(.out)').last().textContent();
+    assert.equal((text.match(/はなこの育児休業/g) ?? []).length, 1, text);
+    // たろうの育休を追加 → 2人とも育休がある状態で追加しても増えず、いまの予定を開く
+    await sheet().locator('.btn:has-text("育休・産休")').click();
+    await page.waitForTimeout(400);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    await sheet().locator('.btn:has-text("育休・産休")').click();
+    await page.waitForTimeout(400);
+    assert.equal(await sheet().locator('h2').textContent(), '育児休業', 'いまの予定を開く');
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    const list = await sheet().locator('.pane:not(.out)').last().textContent();
+    assert.equal((list.match(/の育児休業/g) ?? []).length, 2, list.replace(/\s+/g, ' '));
+    assert.equal(await sheet().locator('.dupbar').count(), 0);
+    await ctx.close();
+  });
+
   it('給与の推移: 夫婦それぞれの昇給率・昇給が止まる年齢を設定でき、グラフと時短・育休の時期が出る。月の収支に働き方のしるし', async () => {
     const { ctx, page } = await open([375, 667]);
     await settle(page);

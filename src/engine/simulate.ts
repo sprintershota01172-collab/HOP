@@ -359,41 +359,48 @@ function workIncome(r: Resolved, p: RPerson, m: YM): { salary: number; benefit: 
   if (base <= 0) return { salary: 0, benefit: 0, ratio: 0, state: 'off' };
   const plan = r.plan;
   const benefitsOn = plan.assumptions.leaveBenefits;
+  const mine = plan.work.filter((w) => w.owner === p.id);
+  // 育休中は時短より優先（同じ月に時短の予定が重なっても、育休として計算する）
+  const leaves = mine.filter((w) => w.type === 'leave');
+  const leaveAt = (t: YM) => leaves.filter((w) => t >= w.startYM && t < w.startYM + w.months).sort((a, b) => a.startYM - b.startYM);
+  const cur = leaveAt(m);
+  if (cur.length) {
+    if (!benefitsOn) return { salary: 0, benefit: 0, ratio: 0, state: 'leave' };
+    // 重なる・続けて登録した育休は1つの育休として、最初の月から数える（給付率の切り替え・産休の3か月）
+    let s0 = m;
+    while (s0 > m - 120 && leaveAt(s0 - 1).length) s0--;
+    const first = leaveAt(s0)[0];
+    const payRate = cur.find((w) => w.payRate != null)?.payRate;
+    // カット率を決めた場合: 手取りのその割合を、期間を通して受け取る
+    if (payRate != null) return { salary: 0, benefit: base * Math.max(0, Math.min(1, payRate)), ratio: 0, state: 'leave' };
+    const idx = m - s0;
+    let benefit: number;
+    if (first.maternity && idx < 3) {
+      benefit = (base * LEAVE.maternityRate) / LEAVE.netRatio;
+    } else {
+      const j = first.maternity ? idx - 3 : idx;
+      const rate = j < 6 ? LEAVE.leaveRateFirst : LEAVE.leaveRateLater;
+      const cap = j < 6 ? LEAVE.capFirst : LEAVE.capLater;
+      benefit = Math.min((base * rate) / LEAVE.netRatio, cap);
+      if (j === 0) {
+        // 出生後休業支援給付: 両親とも育休（配偶者が無収入・単身の場合は不要）
+        const other = r.people.find((q) => q.id !== p.id);
+        const otherLeave = plan.work.some((x) => x.owner !== p.id && x.type === 'leave');
+        if (!other || other.net <= 0 || otherLeave) benefit += ((base * LEAVE.postBirthTopUp) / LEAVE.netRatio) * (28 / 30);
+      }
+    }
+    return { salary: 0, benefit, ratio: 0, state: 'leave' };
+  }
   let ratio = 1;
   let benefit = 0;
   let state: WorkState = 'full';
-  for (const w of plan.work) {
-    if (w.owner !== p.id) continue;
-    if (w.type === 'leave' && m >= w.startYM && m < w.startYM + w.months) {
-      ratio = 0;
-      state = 'leave';
-      if (!benefitsOn) continue;
-      // カット率を決めた場合: 手取りのその割合を、期間を通して受け取る
-      if (w.payRate != null) {
-        benefit = base * Math.max(0, Math.min(1, w.payRate));
-        continue;
-      }
-      const idx = m - w.startYM;
-      if (w.maternity && idx < 3) {
-        benefit = (base * LEAVE.maternityRate) / LEAVE.netRatio;
-      } else {
-        const j = w.maternity ? idx - 3 : idx;
-        const rate = j < 6 ? LEAVE.leaveRateFirst : LEAVE.leaveRateLater;
-        const cap = j < 6 ? LEAVE.capFirst : LEAVE.capLater;
-        benefit = Math.min((base * rate) / LEAVE.netRatio, cap);
-        if (j === 0) {
-          // 出生後休業支援給付: 両親とも育休（配偶者が無収入・単身の場合は不要）
-          const other = r.people.find((q) => q.id !== p.id);
-          const otherLeave = plan.work.some((x) => x.owner !== p.id && x.type === 'leave');
-          if (!other || other.net <= 0 || otherLeave) benefit += ((base * LEAVE.postBirthTopUp) / LEAVE.netRatio) * (28 / 30);
-        }
-      }
-    } else if (w.type === 'short' && m >= w.startYM && (w.endYM == null || m <= w.endYM)) {
+  for (const w of mine) {
+    if (w.type === 'short' && m >= w.startYM && (w.endYM == null || m <= w.endYM)) {
       ratio = Math.min(ratio, Math.max(0, Math.min(1, w.ratio)));
-      if (state !== 'leave' && ratio < 1) state = 'short';
+      if (ratio < 1) state = 'short';
       const child = w.childId ? plan.children.find((c) => c.id === w.childId) : null;
       if (benefitsOn && child && m >= child.birthYM && ageAt(child.birthYM, m) < 2) {
-        benefit = Math.min(base * ratio * LEAVE.shortTimeTopUp, base - base * ratio);
+        benefit = Math.max(benefit, Math.min(base * ratio * LEAVE.shortTimeTopUp, base - base * ratio));
       }
     }
   }

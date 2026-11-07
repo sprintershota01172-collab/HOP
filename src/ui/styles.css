@@ -571,6 +571,9 @@ textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size:
 .legend-row > span { display: inline-flex; align-items: center; gap: 4px; }
 .legend-row .pdot { width: 8px; height: 8px; }
 .legend-row .sw { width: 14px; height: 6px; border-radius: 2px; display: inline-block; }
+/* 同じ人の育休・時短が重なっている知らせ */
+.banner.dupbar { font-size: var(--fs-xs); line-height: 1.35; padding: 4px 6px 4px 10px; }
+.banner.dupbar .btn.small { min-height: 28px; padding: 0 10px; font-size: var(--fs-xs); flex: none; }
 .wf .ln .op .pdot { vertical-align: 1px; }
 .seg button .pdot { margin-right: 5px; vertical-align: 1px; }
 .seg button small { font-weight: 600; font-size: var(--fs-xs); color: var(--ink-3); }

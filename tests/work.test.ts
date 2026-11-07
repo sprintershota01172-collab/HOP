@@ -93,3 +93,66 @@ describe('育休・時短のカット率と期間', () => {
     assert.equal(later.work.spouse!.full, 12, '時短が終わった後はフルタイム');
   });
 });
+
+describe('育休・時短の重なり', () => {
+  it('同じ人の育休が2件重なっていると見つけ、1件（合わせた期間）にまとめられる。別の人・別の種類は重なりにしない', async () => {
+    const { workDupes, mergeWork } = await import('../src/engine/work');
+    const d = household({ children: 1 });
+    const c = d.plan.children[0];
+    const w = (o: Partial<import('../src/engine/types').WorkChange>) => ({ id: uid('work'), owner: 'spouse' as const, type: 'leave' as const, startYM: c.birthYM, months: 12, endYM: null, ratio: 1, maternity: false, childId: c.id, ...o });
+    const a = w({ startYM: c.birthYM - 1, months: 7, maternity: true });
+    const b = w({ months: 12, payRate: 0.7 });
+    const other = w({ owner: 'self', months: 3 });
+    const short = w({ type: 'short', startYM: c.birthYM + 6, endYM: c.birthYM + 35, ratio: 0.5 });
+    const groups = workDupes([a, b, other, short]);
+    assert.equal(groups.length, 1);
+    assert.deepEqual(groups[0].map((x) => x.id).sort(), [a.id, b.id].sort());
+    const merged = mergeWork([a, b, other, short], groups[0]);
+    assert.equal(merged.length, 3);
+    const m = merged.find((x) => x.id === a.id)!;
+    assert.equal(m.startYM, c.birthYM - 1);
+    assert.equal(m.startYM + m.months - 1, c.birthYM + 11, '終わりは遅い方');
+    assert.equal(m.maternity, true);
+    assert.equal(m.payRate, 0.7, 'カット率は引き継ぐ');
+  });
+  it('育休と時短が重なる月は育休として計算する（時短の予定で育休の給付が0円にならない）', () => {
+    const d = household({ children: 1 });
+    const c = d.plan.children[0];
+    d.plan.work = [
+      { id: uid('work'), owner: 'spouse', type: 'leave', startYM: c.birthYM, months: 12, endYM: null, ratio: 1, maternity: false, childId: c.id },
+      { id: uid('work'), owner: 'spouse', type: 'short', startYM: c.birthYM + 6, months: 0, endYM: c.birthYM + 35, ratio: 0.5, maternity: false, childId: c.id },
+    ];
+    const r = resolvePlan(d.plan);
+    const s = wageSeries(r, r.people.find((x) => x.id === 'spouse')!);
+    for (let k = 0; k < 12; k++) {
+      const x = s[c.birthYM + k - r.start];
+      assert.equal(x.state, 'leave');
+      assert.ok(x.benefit > x.base * 0.5, `${k}か月目: 育休の給付`);
+    }
+    assert.equal(s[c.birthYM + 12 - r.start].state, 'short', '育休の後は時短');
+  });
+  it('続けて登録した育休は1つの育休として、給付率は最初の月から数える', () => {
+    const d = household({ children: 1 });
+    const c = d.plan.children[0];
+    d.plan.work = [
+      { id: uid('work'), owner: 'spouse', type: 'leave', startYM: c.birthYM, months: 6, endYM: null, ratio: 1, maternity: false, childId: c.id },
+      { id: uid('work'), owner: 'spouse', type: 'leave', startYM: c.birthYM + 6, months: 6, endYM: null, ratio: 1, maternity: false, childId: c.id },
+    ];
+    const r = resolvePlan(d.plan);
+    const s = wageSeries(r, r.people.find((x) => x.id === 'spouse')!);
+    const x = s[c.birthYM + 7 - r.start];
+    assert.ok(x.benefit / x.base < 0.7, '7か月目以降は約63%');
+  });
+  it('育休を短くしても、時短（25%カット）なら借りられる額は減らない', () => {
+    const budget = (months: number) => {
+      const d = household({ children: 1 });
+      const c = d.plan.children[0];
+      d.plan.work = [
+        { id: uid('work'), owner: 'spouse', type: 'leave', startYM: c.birthYM - 1, months: months + 1, endYM: null, ratio: 1, maternity: true, childId: c.id },
+        { id: uid('work'), owner: 'spouse', type: 'short', startYM: c.birthYM + months, months: 0, endYM: c.birthYM + 35, ratio: 0.75, maternity: false, childId: c.id },
+      ];
+      return computeAll(d).rec.final.loan;
+    };
+    assert.ok(budget(6) >= budget(12) && budget(12) >= budget(18), `${budget(6)} ${budget(12)} ${budget(18)}`);
+  });
+});

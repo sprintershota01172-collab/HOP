@@ -6,11 +6,12 @@
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
-import { CHILD_COST, CHILD_COST_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
+import { CHILD_COST, CHILD_COST_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
 import { NATIONAL, nurseryFee, REGION_KEYS, REGIONS, type RegionKey } from '../../engine/region';
 import { resolvePlan } from '../../engine/resolve';
 import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf, wageSeries, type IncomeOwner, type WorkState } from '../../engine/simulate';
 import { marginalTaxRate } from '../../engine/tax';
+import { mergeWork, workDupes } from '../../engine/work';
 import { annuityPayment } from '../../engine/loan';
 import type { Child, Debt, Insurance, Investment, LifeEvent, LivingItem, LivingStd, Owner, Person, Plan, WorkChange } from '../../engine/types';
 import { ageAt, elemStartFY, nowYM, toYM, ymMonth, ymYear } from '../../engine/ym';
@@ -1373,19 +1374,66 @@ const workCutText = (w: WorkChange) => (w.type === 'leave' ? (w.payRate == null 
 export function WorkSection() {
   const { s, p, up } = usePlan();
   const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
+  // 追加: まだその種類の予定がない「子供 × 人」に追加する（出産する人 → もう1人の順）。全部あれば、いまの予定を開く
   const add = (type: WorkChange['type']) => {
+    const order: Owner[] = p.spouse ? ['spouse', 'self'] : ['self'];
+    const kids = p.children.length ? p.children : [null];
+    const has = (o: Owner, cid: string | null) => p.work.find((w) => w.type === type && w.owner === o && (cid == null || w.childId === cid));
+    let pick: { owner: Owner; child: (typeof kids)[number] } | null = null;
+    for (const c of kids) {
+      const o = order.find((x) => !has(x, c?.id ?? null));
+      if (o) {
+        pick = { owner: o, child: c };
+        break;
+      }
+    }
+    if (!pick) {
+      const ex = has(order[0], kids[0]?.id ?? null)!;
+      s.open({ kind: 'workEdit', props: { id: ex.id } });
+      s.notify(`${nm(ex.owner)}の${type === 'leave' ? '育休' : '時短'}はもう登録されています。期間とカット率はここで変えられます`);
+      return;
+    }
+    const { owner, child } = pick;
     const id = uid('work');
-    const child = p.children[0];
-    const owner: Owner = p.spouse ? 'spouse' : 'self';
-    const leave = p.work.find((w) => w.type === 'leave' && w.childId === child?.id);
-    const start = type === 'short' && leave ? leave.startYM + leave.months : child ? child.birthYM : nowYM() + 12;
-    up((pl) => void pl.work.push({ id, owner, type, startYM: start, months: 12, endYM: child ? child.birthYM + 36 : nowYM() + 48, ratio: 0.75, maternity: type === 'leave', childId: child?.id ?? null }));
+    const leave = p.work.find((w) => w.type === 'leave' && w.owner === owner && w.childId === child?.id);
+    const birthing = owner === order[0];
+    const start = type === 'short' && leave ? leave.startYM + leave.months : child ? child.birthYM - (type === 'leave' && birthing ? 1 : 0) : nowYM() + 12;
+    up((pl) => void pl.work.push({ id, owner, type, startYM: start, months: 12, endYM: child ? child.birthYM + 36 - 1 : nowYM() + 48, ratio: 0.75, maternity: type === 'leave' && birthing, childId: child?.id ?? null }));
     s.open({ kind: 'workEdit', props: { id } });
   };
   return (
-    <Paged initial={p.children.length ? 'quick' : 'list'} pages={[{ value: 'quick', label: 'かんたん設定' }, { value: 'list', label: `登録した予定 ${p.work.length}件` }]}>
-      {(page) => (page === 'quick' ? <WorkQuick /> : <WorkList nm={nm} add={add} />)}
-    </Paged>
+    <>
+      <WorkDupesBar />
+      <Paged initial={p.children.length ? 'quick' : 'list'} pages={[{ value: 'quick', label: 'かんたん設定' }, { value: 'list', label: `登録した予定 ${p.work.length}件` }]}>
+        {(page) => (page === 'quick' ? <WorkQuick /> : <WorkList nm={nm} add={add} />)}
+      </Paged>
+    </>
+  );
+}
+
+/** 同じ人の育休（時短）が2件以上、期間が重なっているときの知らせと「1件にまとめる」 */
+function WorkDupesBar({ keepId }: { keepId?: string }) {
+  const { s, p, up } = usePlan();
+  const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
+  const groups = workDupes(p.work).filter((g) => !keepId || g.some((x) => x.id === keepId));
+  if (!groups.length) return null;
+  return (
+    <div className="banner dupbar" role="alert">
+      <span className="grow">
+        {groups.map((g) => `${nm(g[0].owner)}の${g[0].type === 'leave' ? '育休' : '時短'}が${g.length}件重なっています`).join('。')}
+      </span>
+      <button
+        className="btn small"
+        onClick={() => {
+          up((pl) => {
+            for (const g of workDupes(pl.work)) if (!keepId || g.some((x) => x.id === keepId)) pl.work = mergeWork(pl.work, g, keepId);
+          });
+          s.notify('1件にまとめました（期間は合わせた長さ）', { label: '元に戻す', run: s.undo });
+        }}
+      >
+        1件にまとめる
+      </button>
+    </div>
   );
 }
 
@@ -1407,45 +1455,53 @@ function WorkQuick() {
   }
   const other: Owner = mom === 'self' ? 'spouse' : 'self';
   const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
-  const find = (o: Owner, type: WorkChange['type'], mat?: boolean) => p.work.find((w) => w.childId === child.id && w.owner === o && w.type === type && (mat == null || w.maternity === mat));
-  const matLeave = find(mom, 'leave', true);
-  const pLeave = p.spouse ? find(other, 'leave', false) : undefined;
+  // その人・その子供の予定（育休は産休を含むものを優先）
+  const find = (o: Owner, type: WorkChange['type']) => {
+    const list = p.work.filter((w) => w.childId === child.id && w.owner === o && w.type === type);
+    return list.find((w) => w.maternity) ?? list[0];
+  };
+  const matLeave = find(mom, 'leave');
+  const pLeave = p.spouse ? find(other, 'leave') : undefined;
   const short = find(mom, 'short');
+  const mineOf = (pl: Plan, o: Owner, type: WorkChange['type']) => pl.work.filter((w) => w.childId === child.id && w.owner === o && w.type === type);
   // 産休＋育休: 出産の前月から、子供が指定の月齢になるまで
   const setMat = (untilMonths: number | null) =>
     up((pl) => {
-      // 期間を変えても、決めたカット率はそのまま
-      const payRate = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity)?.payRate ?? null;
-      pl.work = pl.work.filter((w) => !(w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity));
+      // その人のこの子供の育休を1件にする（2件目があっても置き換える）。期間を変えても、決めたカット率はそのまま
+      const old = mineOf(pl, mom, 'leave');
+      const payRate = old.find((w) => w.payRate != null)?.payRate ?? null;
+      pl.work = pl.work.filter((w) => !old.includes(w));
       if (untilMonths != null) pl.work.push({ id: uid('work'), owner: mom, type: 'leave', startYM: child.birthYM - 1, months: untilMonths + 1, endYM: null, ratio: 1, payRate, maternity: true, childId: child.id });
       fixShort(pl);
     });
   const setPLeave = (months: number | null) =>
     up((pl) => {
-      const payRate = pl.work.find((w) => w.childId === child.id && w.owner === other && w.type === 'leave' && !w.maternity)?.payRate ?? null;
-      pl.work = pl.work.filter((w) => !(w.childId === child.id && w.owner === other && w.type === 'leave' && !w.maternity));
+      const old = mineOf(pl, other, 'leave');
+      const payRate = old.find((w) => w.payRate != null)?.payRate ?? null;
+      pl.work = pl.work.filter((w) => !old.includes(w));
       if (months != null) pl.work.push({ id: uid('work'), owner: other, type: 'leave', startYM: child.birthYM, months, endYM: null, ratio: 1, payRate, maternity: false, childId: child.id });
     });
   // 時短: 育休が終わった月から、指定の時期まで。勤務時間（1日8時間に対する割合）で給与の割合を決める
   const leaveEnd = (pl: Plan) => {
-    const l = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'leave' && w.maternity);
-    return l ? l.startYM + l.months : child.birthYM + 12;
+    const l = mineOf(pl, mom, 'leave');
+    return l.length ? Math.max(...l.map((w) => w.startYM + w.months)) : child.birthYM + 12;
   };
   const fixShort = (pl: Plan) => {
-    const sw = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'short');
-    if (sw) sw.startYM = leaveEnd(pl);
+    for (const sw of mineOf(pl, mom, 'short')) sw.startYM = leaveEnd(pl);
   };
   const setShort = (until: 'none' | 'age3' | 'school', hours?: number) =>
     up((pl) => {
-      const cur = pl.work.find((w) => w.childId === child.id && w.owner === mom && w.type === 'short');
+      const old = mineOf(pl, mom, 'short');
+      const cur = old[0];
       // 期間を変えても、決めたカット率（給与の割合）はそのまま
       const ratio = hours != null ? hours / 8 : cur ? cur.ratio : 0.75;
-      pl.work = pl.work.filter((w) => w !== cur);
+      pl.work = pl.work.filter((w) => !old.includes(w));
       if (until === 'none') return;
       const end = until === 'age3' ? child.birthYM + 36 - 1 : toYM(elemStartFY(child.birthYM), 3);
       pl.work.push({ id: uid('work'), owner: mom, type: 'short', startYM: leaveEnd(pl), months: 0, endYM: end, ratio, maternity: false, childId: child.id });
     });
-  const matMonths = matLeave ? matLeave.months - 1 : null;
+  // 子供が何か月になるまでの育休か（産休から続く育休は、出産の前月から）
+  const matMonths = matLeave ? matLeave.startYM + matLeave.months - child.birthYM : null;
   const shortUntil = !short ? 'none' : short.endYM != null && short.endYM <= child.birthYM + 36 ? 'age3' : 'school';
   const chip = (on: boolean, label: string, run: () => void) => (
     <button key={label} className={`chip${on ? ' on' : ''}`} aria-pressed={on ? 'true' : 'false'} onClick={run}>
@@ -1498,7 +1554,15 @@ function WorkQuick() {
           {short && <NumField label="時短の給与カット率" unit="%" scale={100} min={0} max={90} nullable={false} value={1 - short.ratio} onChange={setShortCut} />}
         </div>
       )}
-      <div className="micro" style={{ lineHeight: 1.5 }}>カット率は手取り月収に対して。育休が空欄なら法定の給付（6か月まで手取りの約84%・以降約63%）で計算。期間は › から月単位で変えられます。</div>
+      <div className="micro" style={{ lineHeight: 1.5 }}>
+        {(() => {
+          // 時短の手取り（2歳までの給付込み）が育休の給付より少ないと、育休を短くするほど収入が減る
+          const leavePay = matLeave?.payRate ?? LEAVE.leaveRateLater / LEAVE.netRatio;
+          if (short && matLeave && short.ratio * (1 + LEAVE.shortTimeTopUp) < leavePay)
+            return `時短（${Math.round((1 - short.ratio) * 100)}%カット）の手取りは、育休の給付（手取りの約${Math.round(leavePay * 100)}%）より少ないため、育休を短くすると時短の期間が延びて収入は少し減ります。`;
+          return 'カット率は手取り月収に対して。育休が空欄なら法定の給付（6か月まで手取りの約84%・以降約63%）で計算。期間は › から月単位で変えられます。';
+        })()}
+      </div>
     </>
   );
 }
@@ -1538,10 +1602,31 @@ export function WorkEditSheet({ close, props }: SheetProps) {
   const w = p.work.find((x) => x.id === props.id);
   if (!w) return null;
   const set = (fn: (x: WorkChange) => void) => up((pl) => fn(pl.work.find((x) => x.id === w.id)!));
+  const nm = (o: Owner) => (o === 'self' ? p.self.name || '本人' : p.spouse?.name || '配偶者');
+  // 誰が・種類を変えて同じ人の同じ種類の予定と重なるときは、1件にまとめる（元に戻せる）
+  const setKey = (fn: (x: WorkChange) => void) => {
+    const next = p.work.map((x) => {
+      if (x.id !== w.id) return x;
+      const y = { ...x };
+      fn(y);
+      return y;
+    });
+    const clash = workDupes(next).some((g) => g.some((y) => y.id === w.id));
+    up((pl) => {
+      fn(pl.work.find((x) => x.id === w.id)!);
+      const g = workDupes(pl.work).find((g) => g.some((y) => y.id === w.id));
+      if (g) pl.work = mergeWork(pl.work, g, w.id);
+    });
+    if (clash) {
+      const x = next.find((y) => y.id === w.id)!;
+      s.notify(`${nm(x.owner)}の${x.type === 'leave' ? '育休' : '時短'}と期間が重なるため、1件にまとめました`, { label: '元に戻す', run: s.undo });
+    }
+  };
   return (
     <Sheet title={w.type === 'leave' ? '育児休業' : '時短勤務'} onClose={close} preview foot={<><DeleteBtn onDelete={() => { up((pl) => void (pl.work = pl.work.filter((x) => x.id !== w.id))); close(); s.notify('削除しました', { label: '元に戻す', run: s.undo }); }} /><Done close={close} /></>}>
-      {p.spouse && <Seg label="誰が" value={w.owner} onChange={(v) => set((x) => void (x.owner = v))} options={[{ value: 'self', label: p.self.name || '本人' }, { value: 'spouse', label: p.spouse.name || '配偶者' }]} />}
-      <Seg label="種類" value={w.type} onChange={(v) => set((x) => void (x.type = v))} options={[{ value: 'leave', label: '育休・産休' }, { value: 'short', label: '時短勤務' }]} />
+      <WorkDupesBar keepId={w.id} />
+      {p.spouse && <Seg label="誰が" value={w.owner} onChange={(v) => setKey((x) => void (x.owner = v))} options={[{ value: 'self', label: p.self.name || '本人' }, { value: 'spouse', label: p.spouse.name || '配偶者' }]} />}
+      <Seg label="種類" value={w.type} onChange={(v) => setKey((x) => void (x.type = v))} options={[{ value: 'leave', label: '育休・産休' }, { value: 'short', label: '時短勤務' }]} />
       <div className="grid2">
         <YMField
           label="始まり"
@@ -1569,7 +1654,7 @@ export function WorkEditSheet({ close, props }: SheetProps) {
         <>
           <NumField label="育休中の収入カット率" unit="%" scale={100} min={0} max={100} placeholder="自動（法定の給付）" value={w.payRate == null ? null : 1 - w.payRate} onChange={(v) => set((x) => void (x.payRate = v == null ? null : 1 - v))} />
           <div className="micro" style={{ lineHeight: 1.5 }}>
-            {w.payRate == null ? '空欄は法定の給付（産休は手取りの約83%、育休は6か月まで約84%・以降約63%）で計算' : `期間を通して手取りの${Math.round(w.payRate * 100)}%を受け取る計算です（空欄に戻すと法定の給付）`}
+            {w.payRate == null ? '空欄は法定の給付（手取りの約84%、7か月目から約63%）' : `期間を通して手取りの${Math.round(w.payRate * 100)}%（空欄で法定の給付）`}
           </div>
           <Toggle label="産前産後休業を含む" hint="最初の3か月を出産手当金（賃金の2/3）として計算" value={w.maternity} onChange={(v) => set((x) => void (x.maternity = v))} />
         </>
