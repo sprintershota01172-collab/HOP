@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
-import { CHILD_LIVING, CHILD_LIVING_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
+import { CHILD_LIVING, CHILD_LIVING_SOURCE, EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
 import { NATIONAL, nurseryFee, REGION_KEYS, REGIONS, type RegionKey } from '../../engine/region';
 import { resolvePlan } from '../../engine/resolve';
 import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf, wageSeries, type IncomeOwner, type WorkState } from '../../engine/simulate';
@@ -458,11 +458,11 @@ export function ChildEditSheet({ close, props }: SheetProps) {
           ) : (
             <>
               <div className="micro" style={{ lineHeight: 1.6 }}>
-                空欄のときは、学校ごとの統計平均（学校外活動費: 例 公立小 年{yen(EDU_MEXT.elem.public.outside)}）を使います。入力すると、その金額に置き換えます。
+                空欄のときは、学校ごとの統計平均を使います（習い事・家庭学習: 例 公立小 月{yen(Math.floor((EDU_MEXT.elem.public.outside - EDU_JUKU.elem.public.avg) / 12))}。塾: 中学から、公立中1 月{yen(Math.floor(EDU_JUKU.middle.public.grade[0] / 12))}〜中3 月{yen(Math.floor(EDU_JUKU.middle.public.grade[2] / 12))}）。入力すると、その金額に置き換えます。塾は入力しても中1〜高3だけ計算します。
               </div>
               <div className="grid2">
-                <MoneyField label="習い事" per="month" value={c.lessonsMonthly} placeholder="統計平均" onChange={(v) => set((x) => void (x.lessonsMonthly = v))} />
-                <MoneyField label="塾" per="month" value={c.jukuMonthly} placeholder="統計平均" onChange={(v) => set((x) => void (x.jukuMonthly = v))} />
+                <MoneyField label="習い事・家庭学習" per="month" value={c.lessonsMonthly} placeholder="統計平均" onChange={(v) => set((x) => void (x.lessonsMonthly = v))} />
+                <MoneyField label="塾（中学から）" per="month" value={c.jukuMonthly} placeholder="統計平均" onChange={(v) => set((x) => void (x.jukuMonthly = v))} />
               </div>
               <MoneyField label="その他の教育費" per="year" nullable={false} value={c.otherAnnual} onChange={(v) => set((x) => void (x.otherAnnual = v ?? 0))} />
               <Toggle label="小1〜小3で学童保育を使う" value={!!c.afterSchool} onChange={(v) => set((x) => void (x.afterSchool = v))} />
@@ -500,7 +500,8 @@ function ChildEduIns({ c }: { c: Child }) {
 
 /* ============================== 住む地域・費用の根拠 ============================== */
 /** 円単位でそのまま（保育料・給食費など、表の額と照らし合わせられるように） */
-const exact = (v: number) => `${Math.round(v).toLocaleString('ja-JP')}円`;
+/** 円単位の表示（100円未満は切り捨て） */
+const exact = (v: number) => `${(Math.floor(Math.round(v) / 100) * 100).toLocaleString('ja-JP')}円`;
 const srcUrl = (id: string) => SOURCES.find((x) => x.id === id)?.url ?? null;
 const SRC_MEXT = 'mext-r5';
 const SRC_JFC = 'jfc-r3';
@@ -594,7 +595,9 @@ function ChildCostBasis({ c }: { c: Child }) {
   const nursery = nurseryMonthlyOf(c, ctxAt);
   const pub = (k: 'elem' | 'middle' | 'high') => c[k] === 'public';
   const mext = (k: 'elem' | 'middle' | 'high') => EDU_MEXT[k][c[k]];
-  const outsideNote = c.lessonsMonthly != null || c.jukuMonthly != null ? `入力した習い事・塾 月${yen((c.lessonsMonthly ?? 0) + (c.jukuMonthly ?? 0))}` : '習い事・塾は学習費調査の平均';
+  const outsideNote = c.lessonsMonthly != null ? `入力した習い事・家庭学習 月${yen(c.lessonsMonthly)}` : '習い事・家庭学習は学習費調査の平均（学習塾費を除く）';
+  const lessonsOf = (k: 'elem' | 'middle' | 'high') => EDU_MEXT[k][c[k]].outside - EDU_JUKU[k][c[k]].avg;
+  const jg = (k: 'middle' | 'high') => EDU_JUKU[k][c[k]].grade;
   const rows = [
     c.nurseryUse && <BasisRow key="n" label={`0〜2歳 保育料（${c.nurseryStartAge}歳から）`} value={`月${exact(nursery.fee)}`} note={nursery.how} src={c.nurseryMonthly != null ? null : region?.nursery.source} />,
     c.kinder === 'none' ? (
@@ -607,7 +610,8 @@ function ChildCostBasis({ c }: { c: Child }) {
     <BasisRow key="h" label={`高校（${pub('high') ? '公立' : '私立'}）`} value={`年${exact(mext('high').school)}`} note="学校の費用（授業料の支援は反映していない・多めの見積もり）" src={SRC_MEXT} />,
     c.univ !== 'none' && <BasisRow key="u" label={`大学（${UNIV_LABEL[c.univ]}）`} value={`年${exact(EDU_UNIV[c.univ].annual)}`} note={`入学費用 ${yen(EDU_UNIV[c.univ].entrance)}（高3の2月）・${c.univYears}年`} src={SRC_JFC} />,
     c.afterSchool && <BasisRow key="g" label="学童保育（小1〜小3）" value={c.afterSchoolMonthly != null ? `月${exact(c.afterSchoolMonthly)}` : region?.afterSchool.annual != null ? `年${exact(region.afterSchool.annual)}` : '未入力'} note={c.afterSchoolMonthly != null ? '入力した額' : region ? region.afterSchool.note : '地域を選ぶか月額を入力'} src={c.afterSchoolMonthly != null ? null : region?.afterSchool.source} />,
-    <BasisRow key="o" label="習い事・塾など" value={`公立小 年${yen(mext('elem').outside)}`} note={outsideNote} src={SRC_MEXT} />,
+    <BasisRow key="o" label="習い事・家庭学習" value={c.lessonsMonthly != null ? `月${exact(c.lessonsMonthly)}` : `小学校 年${yen(lessonsOf('elem'))}`} note={c.lessonsMonthly != null ? '入力した額' : `中学校 年${yen(lessonsOf('middle'))}・高校 年${yen(lessonsOf('high'))}。学習費調査の学校外活動費から学習塾費を除いた額`} src={c.lessonsMonthly != null ? null : SRC_MEXT} />,
+    <BasisRow key="j" label="塾（中1〜高3）" value={c.jukuMonthly != null ? `月${exact(c.jukuMonthly)}` : `中学 年${yen(jg('middle')[0])}〜${yen(jg('middle')[2])}`} note={c.jukuMonthly != null ? '入力した額（小学生までは0円）' : `高校 年${yen(jg('high')[0])}〜${yen(jg('high')[2])}。学年別の学習塾費の平均。小学生までは0円`} src={c.jukuMonthly != null ? null : SRC_MEXT} />,
   ].filter(Boolean) as ReactNode[];
   const fit = useFit<HTMLDivElement>(56, 0, 2);
   const pg = usePages(rows, Math.max(2, fit.n));
@@ -661,7 +665,7 @@ export const isLump = (x: LivingItem) => !!x.lump || x.name === '生活費（合
 
 export function LivingSection({ initial }: { initial?: 'base' | 'pocket' | 'car' } = {}) {
   return (
-    <Paged initial={initial ?? 'base'} pages={[{ value: 'base', label: '生活費' }, { value: 'pocket', label: 'お小遣い・自由費' }, { value: 'car', label: '車のローン' }]}>
+    <Paged initial={initial ?? 'base'} pages={[{ value: 'base', label: '生活費' }, { value: 'pocket', label: 'お小遣い' }, { value: 'car', label: '車のローン' }]}>
       {(page) => (page === 'base' ? <LivingBase /> : page === 'pocket' ? <PocketSection /> : <CarLoanSection />)}
     </Paged>
   );
@@ -729,7 +733,7 @@ export function CarLoanSection() {
   );
 }
 
-/** 毎月のお小遣い・自由費（生活費に加えて計算する） */
+/** 毎月のお小遣い（自由費を含む）（生活費に加えて計算する） */
 export function PocketSection() {
   const { p, up } = usePlan();
   const pk = p.pocket;
@@ -741,13 +745,12 @@ export function PocketSection() {
         <MoneyField mark={MARK.pocket} label={`${p.self.name || '本人'}のお小遣い`} required per="month" value={pk.self} placeholder="0円" onChange={(v) => set('self', v)} />
         {p.spouse && <MoneyField mark={MARK.pocket} label={`${p.spouse.name || '配偶者'}のお小遣い`} required per="month" value={pk.spouse} placeholder="0円" onChange={(v) => set('spouse', v)} />}
       </div>
-      <MoneyField mark={MARK.free} label="自由費" hint="外食・レジャー・趣味など家族で使うお金" per="month" value={pk.free} placeholder="0円" onChange={(v) => set('free', v)} />
       <div className="card flat row between">
-        <span className="label">お小遣い・自由費の合計</span>
+        <span className="label">お小遣いの合計</span>
         <b className="num">月{yen(total)}</b>
       </div>
       <div className="micro" style={{ lineHeight: 1.6 }}>
-        生活費と同じく物価に合わせて増やし、老後は「老後の生活費」に切り替えます。「生活費」にまとめて含めている場合は、ここは空欄のままにしてください（二重に数えません）。
+        自由に使えるお金（自由費）もここに入れます。決まった額なので物価が上がっても増やさず、老後は「老後の生活費」に切り替えます。「生活費」にまとめて含めている場合は、ここは空欄のままにしてください（二重に数えません）。
       </div>
     </>
   );

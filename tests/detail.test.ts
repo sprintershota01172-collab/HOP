@@ -10,6 +10,7 @@ import { simulate } from '../src/engine/simulate';
 import type { AppData, Insurance } from '../src/engine/types';
 import { toYM } from '../src/engine/ym';
 import { BASE, household, withPlan } from './helpers';
+import { migrate } from '../src/storage/schema';
 
 const edu = (childId: string, o: Partial<NonNullable<Insurance['child']>> = {}): Insurance => ({
   id: uid('ins'),
@@ -81,15 +82,23 @@ describe('月の収支の内訳', () => {
   });
 });
 
-describe('お小遣い・自由費', () => {
+describe('お小遣い（自由費を含む）', () => {
   const d = household({ children: 0 });
-  const withPocket = withPlan(d, (p) => void (p.pocket = { self: 30_000, spouse: 20_000, free: 10_000 }));
-  it('生活費に加えて毎月支出し、物価に合わせて増える', () => {
+  const withPocket = withPlan(d, (p) => void (p.pocket = { self: 30_000, spouse: 30_000, free: null }));
+  it('生活費に加えて毎月支出し、物価が上がっても増えない（決まった額）', () => {
     const a = baseSim(d).sim;
     const b = baseSim(withPocket).sim;
     assert.equal(b.rows[0].living - a.rows[0].living, 60_000);
     const y5 = b.rows.findIndex((x) => x.ym === toYM(2031, 1));
-    assert.ok(b.rows[y5].living - a.rows[y5].living > 60_000, '5年後は物価の分だけ多い');
+    assert.ok(Math.abs(b.rows[y5].living - a.rows[y5].living - 60_000) <= 1, '5年後も同じ額');
+    assert.ok(a.rows[y5].living > a.rows[0].living, '生活費の項目は物価で増える');
+  });
+  it('以前の版の自由費は、読み込むと本人・配偶者のお小遣いに半分ずつまとまる', () => {
+    const old = withPlan(d, (p) => void (p.pocket = { self: 30_000, spouse: 20_000, free: 10_000 }));
+    const m = migrate(JSON.parse(JSON.stringify(old)));
+    assert.deepEqual(m.plan.pocket, { self: 35_000, spouse: 25_000, free: null });
+    const odd = migrate(JSON.parse(JSON.stringify(withPlan(d, (p) => void (p.pocket = { self: null, spouse: null, free: 15_000 })))));
+    assert.deepEqual(odd.plan.pocket, { self: 7_500, spouse: 7_500, free: null });
   });
   it('住宅購入予算は下がる（生活費として差し引く）', () => {
     assert.ok(computeAll(withPocket).rec.tiers!.standard.maxLoan < computeAll(d).rec.tiers!.standard.maxLoan);
@@ -107,7 +116,7 @@ describe('お小遣い・自由費', () => {
     const det = pieDetails(c.fp!.sim, c.fp!.years);
     const labels = det[1].living.map((x) => x.label);
     assert.ok(labels.some((l) => l.includes('お小遣い')));
-    assert.ok(labels.includes('自由費'));
+    assert.ok(!labels.includes('自由費'));
   });
 });
 

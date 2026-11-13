@@ -368,11 +368,11 @@ export interface Memo {
   updatedAt: number;
 }
 
-/** 毎月のお小遣い・自由費（月額・いまの価値。生活費として物価に合わせて増やす）。null = 未設定 */
+/** 毎月のお小遣い（自由費を含む・月額。決まった額として物価で増やさない）。null = 未設定 */
 export interface Pocket {
   self: Yen | null;
   spouse: Yen | null;
-  /** 家族の自由費（外食・レジャー・趣味など） */
+  /** 以前の版の「自由費」。読み込み時に本人・配偶者のお小遣いへまとめるので、通常は null */
   free: Yen | null;
 }
 

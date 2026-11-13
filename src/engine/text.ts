@@ -4,7 +4,8 @@ export function yenText(v: number): string {
   const neg = v < 0;
   const a = Math.abs(Math.round(v));
   let s: string;
-  if (a < 10_000) s = `${a.toLocaleString('ja-JP')}円`;
+  // 1万円未満は100円未満を切り捨てて表示（例: 4,443円 → 4,400円）
+  if (a < 10_000) s = `${(Math.floor(a / 100) * 100).toLocaleString('ja-JP')}円`;
   else if (a < 1_000_000) s = `${(Math.round(a / 1_000) / 10).toLocaleString('ja-JP', { maximumFractionDigits: 1 })}万円`;
   else if (a < 100_000_000) s = `${Math.round(a / 10_000).toLocaleString('ja-JP')}万円`;
   else {

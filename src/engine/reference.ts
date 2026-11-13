@@ -28,11 +28,11 @@ export const SOURCES: Source[] = [
     id: 'mext-r5',
     title: '令和5年度 子供の学習費調査',
     org: '文部科学省',
-    url: 'https://www.mext.go.jp/content/20241225-mxt_chousa01_000039333_1.pdf',
-    published: '2024-12-25',
-    checked: CHECKED,
+    url: 'https://www.mext.go.jp/content/20260116-mxt_chousa01-000039333_3.pdf',
+    published: '2024-12-25（2026-01-16 数値訂正版）',
+    checked: CHECKED_CHILD,
     kind: 'stat',
-    note: '幼稚園〜高校の学習費（学校教育費・給食費・学校外活動費）の年額。教育費の初期値に使用。',
+    note: '幼稚園〜高校の学習費（学校教育費・給食費・学校外活動費）の年額。教育費の初期値に使用。学習塾費（表6）は中学生からとし、中学・高校は学年別の値を使う。',
   },
   {
     id: 'jfc-r3',
@@ -93,6 +93,16 @@ export const SOURCES: Source[] = [
     checked: CHECKED_CHILD,
     kind: 'guide',
     note: '身体活動レベル「ふつう」の男女平均。子供の食費を年齢で分ける比率に使う（0歳 約590kcal → 中学生 2,500kcal・高校生 2,575kcal。30〜49歳の大人は2,400kcal）。',
+  },
+  {
+    id: 'fukoku-phone-2026',
+    title: '中高生の子どものスマホ代（47都道府県調査）',
+    org: 'フコク生命「47Life」編集部（北海道新聞の記事で照合）',
+    url: 'https://www.hokkaido-np.co.jp/article/1335071/',
+    published: '2026',
+    checked: CHECKED_CHILD,
+    kind: 'stat',
+    note: '中高生の毎月のスマホ代 全国平均3,385円（2024年は3,710円）。中1〜高3の携帯代に月3,300円（100円未満切り捨て）を使う。',
   },
   {
     id: 'kakei-2024',
@@ -403,13 +413,36 @@ export const CARE_RESERVE = 472_000 + 90_000 * 55;
 /** school = 学校教育費 + 学校給食費、outside = 学校外活動費（塾・習い事等） */
 export const EDU_MEXT = {
   kinder: { public: { school: 84_597, outside: 100_049 }, private: { school: 189_803, outside: 157_535 } },
-  elem: { public: { school: 120_158, outside: 216_107 }, private: { school: 1_107_684, outside: 720_428 } },
-  middle: { public: { school: 186_414, outside: 356_061 }, private: { school: 1_137_378, outside: 422_981 } },
-  high: { public: { school: 351_452, outside: 246_300 }, private: { school: 766_490, outside: 263_793 } },
+  elem: { public: { school: 110_110, outside: 256_489 }, private: { school: 1_031_849, outside: 709_667 } },
+  middle: { public: { school: 186_432, outside: 356_018 }, private: { school: 1_137_378, outside: 422_981 } },
+  high: { public: { school: 351_523, outside: 245_431 }, private: { school: 832_650, outside: 346_611 } },
 } as const;
 
+/**
+ * 学校外活動費のうち学習塾費（同じ調査の表6・年額）。avg = 学校種の平均、grade = 学年別（中1〜3・高1〜3）。
+ * 塾は中学生から通う前提にし、幼稚園・小学校の初期値からは学習塾費を除く（家庭学習・通信教育・習い事は残す）。
+ * 中学・高校は学年別の学習塾費にする（受験の学年ほど高い）。
+ */
+export const EDU_JUKU = {
+  kinder: { public: { avg: 14_167 }, private: { avg: 25_261 } },
+  elem: { public: { avg: 75_194 }, private: { avg: 259_492 } },
+  middle: { public: { avg: 230_385, grade: [133_647, 213_759, 341_220] }, private: { avg: 168_058, grade: [151_796, 151_425, 202_127] } },
+  high: { public: { avg: 147_140, grade: [89_760, 148_775, 206_454] }, private: { avg: 166_867, grade: [109_647, 180_326, 214_709] } },
+} as const;
+
+/** 塾を始める学年（中1）。gradeAt の値で 7 */
+export const JUKU_FROM_GRADE = 7;
+
+/** 学校外活動費の初期値（年額）。gradeInStage = その学校種での学年（0始まり。中1 = 0） */
+export function eduOutside(stage: keyof typeof EDU_MEXT, choice: 'public' | 'private', gradeInStage = 0): number {
+  const total = EDU_MEXT[stage][choice].outside;
+  const j = EDU_JUKU[stage][choice] as { avg: number; grade?: readonly number[] };
+  if (!j.grade) return total - j.avg;
+  return total - j.avg + j.grade[Math.max(0, Math.min(j.grade.length - 1, gradeInStage))];
+}
+
 /** EDU_MEXT の school のうち学校給食費（同じ調査・年額）。公立小は2026年4月から国の負担軽減で保護者負担0円とする */
-export const EDU_LUNCH = { kinderPublic: 15_235, elemPublic: 38_405, middlePublic: 35_667 } as const;
+export const EDU_LUNCH = { kinderPublic: 15_235, elemPublic: 35_774, middlePublic: 35_671 } as const;
 /** 公立小学校の給食費の負担軽減が始まる月 */
 export const LUNCH_RELIEF_FROM = 2026 * 12 + 3; // 2026年4月（YM = 年×12 + 月−1）
 
@@ -550,19 +583,30 @@ export const CHILD_STD_AVG = {
   goods: CHILD_STD.kakeiGoods / CHILD_STD.kakeiMembers,
 };
 
-/** 子供の生活費（年額・円）。CHILD_COST の食費・衣類・日用品を統計に合わせたもの。それ以外は調査の値のまま */
+/** 中高生のスマホ代（月・全国平均）。フコク生命「47Life」の調査（2026年）3,385円を100円未満切り捨て */
+export const CHILD_PHONE_TEEN = 3_300;
+
+/**
+ * 子供の生活費（年額・円）。CHILD_COST の食費・衣類・日用品を統計に合わせ、中高生の携帯代をスマホ代の平均にしたもの。
+ * それ以外は調査の値のまま。どの項目も月額で100円未満を切り捨てる（年額 = 月額 × 12）。
+ */
 export const CHILD_LIVING: (typeof CHILD_COST)[number][] = (() => {
   const kc = meanOf(CHILD_STD.kcal);
   const cl = meanOf(CHILD_COST.map((r) => r.clothes));
   const gd = meanOf(CHILD_COST.map((r) => r.goods));
+  const yr = (monthly: number) => Math.floor(monthly / 100) * 100 * 12;
   return CHILD_COST.map((r, i) => ({
-    ...r,
-    food: Math.round(CHILD_STD_AVG.food * (CHILD_STD.kcal[i] / kc) * 12),
-    clothes: Math.round(CHILD_STD_AVG.clothes * (r.clothes / cl) * 12),
-    goods: Math.round(CHILD_STD_AVG.goods * (r.goods / gd) * 12),
+    food: yr(CHILD_STD_AVG.food * (CHILD_STD.kcal[i] / kc)),
+    clothes: yr(CHILD_STD_AVG.clothes * (r.clothes / cl)),
+    goods: yr(CHILD_STD_AVG.goods * (r.goods / gd)),
+    medical: yr(r.medical / 12),
+    phone: i >= 13 ? CHILD_PHONE_TEEN * 12 : yr(r.phone / 12),
+    allowance: yr(r.allowance / 12),
+    events: yr(r.events / 12),
+    leisure: yr(r.leisure / 12),
   }));
 })();
-export const CHILD_LIVING_SOURCE = '食費・衣類は人事院「標準生計費」（令和7年4月）、食費の年齢差は厚生労働省「日本人の食事摂取基準」、日用品は総務省「家計調査」2024年、医療・携帯・おこづかい・行事・レジャーは竹原ほか「0〜18歳の子育てに要する費用の調査2024」';
+export const CHILD_LIVING_SOURCE = '食費・衣類は人事院「標準生計費」（令和7年4月）、食費の年齢差は厚生労働省「日本人の食事摂取基準」、日用品は総務省「家計調査」2024年、中高生の携帯代はフコク生命「47Life」の調査（2026年）、医療・小学生までの携帯・おこづかい・行事・レジャーは竹原ほか「0〜18歳の子育てに要する費用の調査2024」。月額の100円未満は切り捨て';
 
 /* ---------- アプリの仮定（ユーザーが変更できる初期値） ---------- */
 export const ASSUME = {

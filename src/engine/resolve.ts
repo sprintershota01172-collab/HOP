@@ -70,9 +70,9 @@ export interface Resolved {
   purchaseYM: YM;
   rent: Yen;
   retireLiving: Yen;
-  /** 毎月の生活費（項目の合計 ＋ お小遣い・自由費） */
+  /** 毎月の生活費（項目の合計 ＋ お小遣い） */
   livingTotal: Yen;
-  /** お小遣い・自由費の合計（livingTotal に含む） */
+  /** お小遣いの合計（livingTotal に含む） */
   pocketTotal: Yen;
   insurances: RInsurance[];
   missing: Missing[];
@@ -142,7 +142,7 @@ export function resolvePlan(plan: Plan): Resolved {
   const pocketTotal = Math.round((pk.self ?? 0) + (plan.spouse ? pk.spouse ?? 0 : 0) + (pk.free ?? 0));
   const livingTotal = livingItems + pocketTotal;
   if (pk.self == null && pk.free == null && (plan.spouse == null || pk.spouse == null))
-    assumed.push({ key: 'pocket', label: 'お小遣い・自由費', value: '未入力（生活費に含めている場合はそのままで可）', impact: 'low', sheet: 'living' });
+    assumed.push({ key: 'pocket', label: 'お小遣い', value: '未入力（生活費に含めている場合はそのままで可）', impact: 'low', sheet: 'living' });
 
   // 保険: 学資保険は子供の年齢から払込・受取の月を決める（子供が見つからない学資保険は計算に入れない）
   const insurances: RInsurance[] = [];

@@ -43,16 +43,19 @@ describe('子供の生活費（年齢・学年別）', () => {
 
   it('食費・衣類・日用品は統計に合わせる（子供1人の平均 = 標準生計費・家計調査の値）', () => {
     const mean = (f: (r: (typeof CHILD_LIVING)[number]) => number) => CHILD_LIVING.reduce((t, r) => t + f(r), 0) / CHILD_LIVING.length / 12;
-    near(mean((r) => r.food), (88_750 - 48_320) / 3, 5);
-    near(mean((r) => r.clothes), (12_450 - 4_480) / 3, 5);
-    near(mean((r) => r.goods), 12_788 / 2.88, 5);
+    // 月額は100円未満切り捨て
+    near(mean((r) => r.food), (88_750 - 48_320) / 3, 100);
+    near(mean((r) => r.clothes), (12_450 - 4_480) / 3, 100);
+    near(mean((r) => r.goods), 12_788 / 2.88, 100);
+    for (const r of CHILD_LIVING) for (const v of Object.values(r)) assert.equal((v / 12) % 100, 0, '月額は100円単位');
     // 中学生の食費は月2万円未満、衣類は月5,000円未満（調査の平均の約半分・約4分の1）
     for (const k of [13, 14, 15]) {
       assert.ok(CHILD_LIVING[k].food / 12 < 20_000 && CHILD_LIVING[k].food < CHILD_COST[k].food * 0.6);
       assert.ok(CHILD_LIVING[k].clothes / 12 < 5_000);
     }
-    // 医療・携帯・おこづかい・行事・レジャーは調査の値のまま
-    for (let k = 0; k < CHILD_COST.length; k++) assert.equal(CHILD_LIVING[k].phone, CHILD_COST[k].phone);
+    // 中高生の携帯代はスマホ代の平均（月3,300円）、レジャーなどは調査の値（100円未満切り捨て）
+    for (let k = 13; k <= 18; k++) assert.equal(CHILD_LIVING[k].phone, 3_300 * 12);
+    for (let k = 0; k < CHILD_COST.length; k++) assert.equal(CHILD_LIVING[k].leisure, Math.floor(CHILD_COST[k].leisure / 12 / 100) * 100 * 12);
   });
 
   it('水準（％）を変えると比例して変わる', () => {

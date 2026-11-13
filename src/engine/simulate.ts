@@ -1,5 +1,5 @@
 import { buildSchedule, ratePath, type LoanSchedule } from './loan';
-import { ASSUME, CHILD_ALLOWANCE, CHILD_LIVING, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, LUNCH_RELIEF_FROM } from './reference';
+import { ASSUME, CHILD_ALLOWANCE, CHILD_LIVING, EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, JUKU_FROM_GRADE, LEAVE, LUNCH_RELIEF_FROM, eduOutside } from './reference';
 import { FUKUSHOKU_EXEMPT_BELOW, NATIONAL, nurseryFee, REGIONS, residentIncomeTax, type RegionInfo } from './region';
 import { annuityPayment } from './loan';
 import type { Resolved, RPerson } from './resolve';
@@ -163,7 +163,8 @@ export const EDU_PART_LABEL = {
   school: '学校の費用',
   lunch: '給食費',
   afterSchool: '学童保育',
-  outside: '習い事・塾など',
+  outside: '習い事・家庭学習',
+  juku: '塾',
   univ: '大学の学費',
   away: '仕送り',
   other: 'その他の教育費',
@@ -236,8 +237,14 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
   };
   const g = gradeAt(c.birthYM, m);
   const univEnd = 12 + (c.univ === 'none' ? 0 : c.univYears);
-  const customOutside = c.lessonsMonthly != null || c.jukuMonthly != null;
-  const outsideMonthly = (c.lessonsMonthly ?? 0) + (c.jukuMonthly ?? 0);
+  // 習い事・家庭学習（学校外活動費から学習塾費を除いた分）と塾は別々に。入力があればその額、空欄なら統計平均
+  // 塾は中学生から（入力した塾代も中1から高3まで）
+  const lessons = (stage: keyof typeof EDU_MEXT, choice: 'public' | 'private') => (c.lessonsMonthly != null ? c.lessonsMonthly : (EDU_MEXT[stage][choice].outside - EDU_JUKU[stage][choice].avg) / 12);
+  const juku = (stage: keyof typeof EDU_MEXT, choice: 'public' | 'private', gi: number) => {
+    if (g < JUKU_FROM_GRADE) return 0;
+    if (c.jukuMonthly != null) return c.jukuMonthly;
+    return (eduOutside(stage, choice, gi) - (EDU_MEXT[stage][choice].outside - EDU_JUKU[stage][choice].avg)) / 12;
+  };
   const living = lv.food + lv.wear + lv.misc + lv.leisure;
   if (g <= -3) {
     const months = m - c.birthYM;
@@ -246,7 +253,7 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
     if (c.kinder !== 'none') {
       const row = EDU_MEXT.kinder[c.kinder];
       add('school', row.school / 12);
-      add('outside', customOutside ? outsideMonthly : row.outside / 12);
+      add('outside', lessons('kinder', c.kinder));
     } else {
       // 保育園など: 保育料は無償化で0円、給食費（主食費＋副食費）は実費。所得割57,700円未満なら副食費は免除
       if (c.nurseryUse) {
@@ -254,12 +261,12 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
         const meal = ctx?.region ? ctx.region.preschoolMeal.monthly - (exempt ? ctx.region.preschoolMeal.fukushoku : 0) : exempt ? 0 : NATIONAL.preschoolMeal;
         add('lunch', meal);
       }
-      add('outside', customOutside ? outsideMonthly : EDU_MEXT.kinder.public.outside / 12);
+      add('outside', lessons('kinder', 'public'));
     }
   } else if (g <= 12) {
-    const stage = g <= 6 ? EDU_MEXT.elem : g <= 9 ? EDU_MEXT.middle : EDU_MEXT.high;
+    const sk = g <= 6 ? 'elem' : g <= 9 ? 'middle' : 'high';
     const choice = g <= 6 ? c.elem : g <= 9 ? c.middle : c.high;
-    const row = stage[choice];
+    const row = EDU_MEXT[sk][choice];
     if (choice === 'public' && g <= 6) {
       // 公立小: 給食費は2026年4月から国の負担軽減（月5,200円まで）で保護者負担0円
       add('school', (row.school - EDU_LUNCH.elemPublic) / 12);
@@ -270,7 +277,8 @@ export function childMonth(c: Child, m: YM, childLiving: Resolved['plan']['assum
     } else {
       add('school', row.school / 12);
     }
-    add('outside', customOutside ? outsideMonthly : row.outside / 12);
+    add('outside', lessons(sk, choice));
+    add('juku', juku(sk, choice, sk === 'middle' ? g - 7 : sk === 'high' ? g - 10 : 0));
     if (c.afterSchool && g >= 1 && g <= 3) add('afterSchool', c.afterSchoolMonthly ?? (ctx?.region?.afterSchool.annual ?? 0) / 12);
   } else if (g <= univEnd) {
     const u = EDU_UNIV[c.univ as Exclude<typeof c.univ, 'none'>];
@@ -659,16 +667,18 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
     }
 
     const retiredAll = m >= r.retireAllYM;
-    let living = (retiredAll ? r.retireLiving : r.livingTotal) * f;
+    // お小遣いは決まった額なので物価で増やさない（生活費の項目だけ物価に合わせて増やす）
+    let living = retiredAll ? r.retireLiving * f : (r.livingTotal - r.pocketTotal) * f + r.pocketTotal;
     if (rec) {
       if (retiredAll) rec.add(i, 'living', 'retire', '老後の生活費', r.retireLiving * f, { sheet: 'assumptions', props: { page: 'life' } });
       else {
         for (const x of plan.living) rec.add(i, 'living', `item:${x.id}`, x.name, x.monthly * f, { sheet: 'living' });
         const pk = plan.pocket;
         if (pk) {
-          rec.add(i, 'living', 'pocket:self', `${r.people[0]?.name ?? '本人'}のお小遣い`, (pk.self ?? 0) * f, { sheet: 'living', props: { page: 'pocket' } });
-          if (plan.spouse) rec.add(i, 'living', 'pocket:spouse', `${r.people[1]?.name ?? '配偶者'}のお小遣い`, (pk.spouse ?? 0) * f, { sheet: 'living', props: { page: 'pocket' } });
-          rec.add(i, 'living', 'pocket:free', '自由費', (pk.free ?? 0) * f, { sheet: 'living', props: { page: 'pocket' } });
+          rec.add(i, 'living', 'pocket:self', `${r.people[0]?.name ?? '本人'}のお小遣い`, pk.self ?? 0, { sheet: 'living', props: { page: 'pocket' } });
+          if (plan.spouse) rec.add(i, 'living', 'pocket:spouse', `${r.people[1]?.name ?? '配偶者'}のお小遣い`, pk.spouse ?? 0, { sheet: 'living', props: { page: 'pocket' } });
+          // 以前の版の「自由費」（読み込み時にお小遣いへまとめるので、通常は0）
+          if (pk.free) rec.add(i, 'living', 'pocket:free', 'お小遣い（共通）', pk.free, { sheet: 'living', props: { page: 'pocket' } });
         }
       }
     }

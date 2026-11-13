@@ -4,7 +4,7 @@ import { monthPie, toYears } from '../src/engine/aggregate';
 import { uid } from '../src/engine/defaults';
 import { goalStatus } from '../src/engine/goals';
 import { computeAll } from '../src/engine/index';
-import { EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE } from '../src/engine/reference';
+import { EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, eduOutside } from '../src/engine/reference';
 import { makeContext, scenarios, tryLoan } from '../src/engine/recommend';
 import { resolvePlan } from '../src/engine/resolve';
 import { childAllowance, childMonth, incomeOf, simulate, spendOf } from '../src/engine/simulate';
@@ -114,9 +114,13 @@ describe('教育費', () => {
     const c = d.plan.children[0]; // 2028年6月生まれ → 小1は2035年4月、大1は2047年4月
     const living = d.plan.assumptions.childLiving;
     assert.equal(childMonth(c, toYM(2028, 5), living).edu, 0);
-    near(childMonth(c, toYM(2035, 3), living).edu, (EDU_MEXT.kinder.public.school + EDU_MEXT.kinder.public.outside) / 12);
-    near(childMonth(c, toYM(2035, 4), living).edu, (EDU_MEXT.elem.public.school - EDU_LUNCH.elemPublic + EDU_MEXT.elem.public.outside) / 12);
-    near(childMonth(c, toYM(2047, 2), living).edu, (EDU_MEXT.high.public.school + EDU_MEXT.high.public.outside) / 12 + EDU_UNIV.national.entrance);
+    // 塾（学習塾費）は中学から。幼稚園・小学校は学校外活動費から学習塾費を除く
+    near(childMonth(c, toYM(2035, 3), living).edu, (EDU_MEXT.kinder.public.school + EDU_MEXT.kinder.public.outside - EDU_JUKU.kinder.public.avg) / 12);
+    near(childMonth(c, toYM(2035, 4), living).edu, (EDU_MEXT.elem.public.school - EDU_LUNCH.elemPublic + EDU_MEXT.elem.public.outside - EDU_JUKU.elem.public.avg) / 12);
+    assert.equal(childMonth(c, toYM(2035, 4), living).parts.juku, undefined);
+    // 高3の塾は高3の学年の学習塾費
+    near(childMonth(c, toYM(2047, 2), living).parts.juku!, EDU_JUKU.high.public.grade[2] / 12);
+    near(childMonth(c, toYM(2047, 2), living).edu, (EDU_MEXT.high.public.school + eduOutside('high', 'public', 2)) / 12 + EDU_UNIV.national.entrance);
     near(childMonth(c, toYM(2047, 4), living).edu, EDU_UNIV.national.annual / 12);
     assert.equal(childMonth(c, toYM(2051, 4), living).edu, 0);
   });
@@ -126,10 +130,23 @@ describe('教育費', () => {
     const living = d.plan.assumptions.childLiving;
     const jan = { ...d.plan.children[0], birthYM: toYM(2029, 1) };
     const apr = { ...d.plan.children[0], birthYM: toYM(2029, 4) };
-    const elem = (EDU_MEXT.elem.public.school - EDU_LUNCH.elemPublic + EDU_MEXT.elem.public.outside) / 12;
+    const elem = (EDU_MEXT.elem.public.school - EDU_LUNCH.elemPublic + EDU_MEXT.elem.public.outside - EDU_JUKU.elem.public.avg) / 12;
     near(childMonth(jan, toYM(2035, 4), living).edu, elem);
     assert.ok(Math.abs(childMonth(apr, toYM(2035, 4), living).edu - elem) > 1);
     near(childMonth(apr, toYM(2036, 4), living).edu, elem);
+  });
+
+  it('塾は中学から（中1・中3は学年別の平均、入力した塾代も小学生までは0）', () => {
+    const d = household({ children: 1 });
+    const living = d.plan.assumptions.childLiving;
+    const c = d.plan.children[0]; // 小1 2035年4月 → 中1 2041年4月
+    assert.equal(childMonth(c, toYM(2040, 4), living).parts.juku, undefined);
+    near(childMonth(c, toYM(2041, 4), living).parts.juku!, EDU_JUKU.middle.public.grade[0] / 12);
+    near(childMonth(c, toYM(2043, 4), living).parts.juku!, EDU_JUKU.middle.public.grade[2] / 12);
+    const set = { ...c, jukuMonthly: 20_000, lessonsMonthly: 8_000 };
+    assert.equal(childMonth(set, toYM(2040, 4), living).parts.juku, undefined);
+    assert.equal(childMonth(set, toYM(2040, 4), living).parts.outside, 8_000);
+    assert.equal(childMonth(set, toYM(2041, 4), living).parts.juku, 20_000);
   });
 
   it('教育費が増える（私立）と推奨額は下がる', () => {

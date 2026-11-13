@@ -53,6 +53,16 @@ export function migrate(raw: unknown): AppData {
     assumptions: merge(defaultAssumptions(), p.assumptions),
   };
   plan.self.id = 'self';
+  // 以前の版の「自由費」はお小遣いと同じものとして、本人・配偶者のお小遣いに半分ずつ（100円未満は本人へ）まとめる
+  const pk = plan.pocket;
+  if (pk && pk.free) {
+    if (plan.spouse) {
+      const half = Math.floor(pk.free / 2 / 100) * 100;
+      pk.spouse = (pk.spouse ?? 0) + half;
+      pk.self = (pk.self ?? 0) + (pk.free - half);
+    } else pk.self = (pk.self ?? 0) + pk.free;
+  }
+  if (pk) pk.free = null;
   if (plan.spouse) plan.spouse.id = 'spouse';
   for (const k of ['debts', 'children', 'living', 'insurances', 'investments', 'goals', 'events', 'work', 'incomeChanges'] as const) {
     if (!Array.isArray(plan[k])) (plan as unknown as Record<string, unknown[]>)[k] = [];

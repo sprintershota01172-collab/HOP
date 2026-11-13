@@ -337,14 +337,14 @@ export interface DetailGroup {
 
 /**
  * 生活費の内訳を、まとまりごとに合計する（合計は元の行の合計と一致）。
- * 行の key: item:… = 入力した生活費、pocket:… = お小遣い・自由費、child:<子供のid>:… = 子供の生活費、retire = 老後の生活費
+ * 行の key: item:… = 入力した生活費、pocket:… = お小遣い、child:<子供のid>:… = 子供の生活費、retire = 老後の生活費
  */
 export function groupLiving(rows: DetailRow[], children: { id: string; name: string }[]): DetailGroup[] {
   const groups = new Map<string, DetailGroup>();
   const order: string[] = ['item', 'pocket', ...children.map((c) => `child:${c.id}`), 'retire', 'other'];
   const labelOf = (k: string) => {
     if (k === 'item') return '大人の生活費';
-    if (k === 'pocket') return 'お小遣い・自由費';
+    if (k === 'pocket') return 'お小遣い';
     if (k === 'retire') return '老後の生活費';
     if (k.startsWith('child:')) {
       const c = children.find((x) => `child:${x.id}` === k);

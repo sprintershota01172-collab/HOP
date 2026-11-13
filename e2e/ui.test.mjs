@@ -343,52 +343,32 @@ describe('入力・保存・再計算', () => {
     // 生活費の内訳はまとまり（大人の生活費・お小遣い・子供ごと）で出て、合計は生活費と一致する
     const groupSum = await page.$$eval('.detail .ln .v', (els) => els.map((e) => e.textContent));
     assert.ok(groupSum.length >= 1, '生活費のまとまりが出る');
-    // お小遣い・自由費のまとまり（ページ送り）→ 中の「お小遣い」の行 → 入力を開く
-    let row = page.locator('.detail .ln:has-text("お小遣い・自由費")').first();
+    // お小遣いのまとまり（ページ送り）→ 中の「◯◯のお小遣い」の行 → 入力を開く
+    let row = page.locator('.detail button[aria-label="お小遣いの内訳を見る"]').first();
     for (let i = 0; i < 20 && !(await row.count()); i++) {
       await page.click('.detail .minipager button[aria-label="次のページ"]');
       await page.waitForTimeout(150);
     }
     await row.click();
     await page.waitForTimeout(300);
-    assert.ok((await page.locator('.detail .label').first().textContent()).includes('お小遣い・自由費'), 'まとまりの中を開く');
+    assert.ok((await page.locator('.detail .label').first().textContent()).includes('お小遣い'), 'まとまりの中を開く');
     assert.deepEqual((await layoutReport(page)).clipped, [], 'まとまりの中: 中身が切れている部品');
+    assert.equal(await page.locator('.detail .ln:has-text("自由費")').count(), 0, '自由費はお小遣いにまとめた');
     row = page.locator('.detail .ln:has-text("のお小遣い")').first();
-    for (let i = 0; i < 20 && !(await row.count()); i++) {
-      await page.click('.detail .minipager button[aria-label="次のページ"]');
-      await page.waitForTimeout(150);
-    }
     await row.click();
     await page.waitForTimeout(400);
     const sheet = page.locator('.sheet:not(.closing)').last();
-    assert.equal(await sheet.locator('.seg button[aria-pressed="true"]').first().textContent(), 'お小遣い・自由費');
-    const free = sheet.locator('.field:has-text("自由費") input').first();
-    await free.fill('3');
-    await free.press('Enter');
+    assert.equal(await sheet.locator('.seg button[aria-pressed="true"]').first().textContent(), 'お小遣い');
+    assert.equal(await sheet.locator('.field:has-text("自由費")').count(), 0, '自由費の入力欄はない');
+    const pocket = sheet.locator('.field:has-text("のお小遣い") input').first();
+    await pocket.fill('9');
+    await pocket.press('Enter');
     await page.waitForSelector('.sheet:not(.closing) .preview .diff.neg', { timeout: 15000 });
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
-    await page.click('.legend button:has-text("生活費")');
-    if (await page.locator('.detail button[aria-label="生活費の内訳にもどる"]').count()) {
-      await page.click('.detail button[aria-label="生活費の内訳にもどる"]');
-      await page.waitForTimeout(150);
-    }
-    row = page.locator('.detail .ln:has-text("お小遣い・自由費")').first();
-    for (let i = 0; i < 20 && !(await row.count()); i++) {
-      await page.click('.detail .minipager button[aria-label="次のページ"]');
-      await page.waitForTimeout(150);
-    }
-    await row.click();
-    await page.waitForTimeout(300);
-    row = page.locator('.detail .ln:has-text("自由費")');
-    for (let i = 0; i < 20 && !(await row.count()); i++) {
-      await page.click('.detail .minipager button[aria-label="次のページ"]');
-      await page.waitForTimeout(150);
-    }
-    assert.equal(await row.count(), 1, '自由費が内訳に出る');
     await page.click('nav button:nth-child(1)');
     await settle(page);
-    assert.notEqual(await heroText(page), before, '自由費を入れると予算が変わる');
+    assert.notEqual(await heroText(page), before, 'お小遣いを増やすと予算が変わる');
     await ctx.close();
   });
 
