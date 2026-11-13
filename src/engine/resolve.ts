@@ -200,7 +200,7 @@ export function resolvePlan(plan: Plan): Resolved {
       assumed.push({ key: `gakudo-${c.id}`, label: `${c.name || '子供'}の学童保育`, value: '月額が未入力のため0円で計算', impact: 'low', sheet: 'children' });
   }
   if (plan.children.length > 0)
-    assumed.push({ key: 'childLiving', label: '子供の生活費（食費・衣類・日用品など）', value: '年齢・学年別の全国調査の平均（2024年）を使用', impact: 'low', sheet: 'assumptions' });
+    assumed.push({ key: 'childLiving', label: '子供の生活費（食費・衣類・日用品など）', value: '年齢・学年別。食費・衣類は人事院の標準生計費、日用品は家計調査、医療・携帯・おこづかい・レジャーは子育て費用の調査の平均', impact: 'low', sheet: 'assumptions' });
   if (!a.childrenConfirmed && plan.children.length === 0)
     assumed.push({ key: 'children', label: '子供の予定', value: 'なしとして計算', impact: 'high', sheet: 'children' });
   if (h.maintenanceMonthly == null)

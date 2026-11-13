@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
-import { CHILD_COST, CHILD_COST_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
+import { CHILD_LIVING, CHILD_LIVING_SOURCE, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
 import { NATIONAL, nurseryFee, REGION_KEYS, REGIONS, type RegionKey } from '../../engine/region';
 import { resolvePlan } from '../../engine/resolve';
 import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf, wageSeries, type IncomeOwner, type WorkState } from '../../engine/simulate';
@@ -622,32 +622,35 @@ function ChildCostBasis({ c }: { c: Child }) {
   );
 }
 
-/** 子供の生活費（全国調査の平均・月額）を年齢・学年ごとに示す */
+/** 子供の生活費（標準的な家計・月額）を年齢・学年ごとに示す */
 function ChildCostTable({ scale }: { scale: number }) {
-  // 表の行: 調査の年齢・学年（CHILD_COST の行番号の範囲）
+  // 表の行: 年齢・学年（CHILD_LIVING の行番号の範囲）
   const rows: [string, number, number][] = [['0歳', 0, 0], ['1〜2歳', 1, 2], ['3〜6歳', 3, 6], ['小学生', 7, 12], ['中学生', 13, 15], ['高校生', 16, 18]];
-  const avg = (from: number, to: number, f: (r: (typeof CHILD_COST)[number]) => number) => {
+  const avg = (from: number, to: number, f: (r: (typeof CHILD_LIVING)[number]) => number) => {
     let t = 0;
-    for (let k = from; k <= to; k++) t += f(CHILD_COST[k]);
+    for (let k = from; k <= to; k++) t += f(CHILD_LIVING[k]);
     return (t / (to - from + 1) / 12) * scale;
   };
-  const all = (r: (typeof CHILD_COST)[number]) => r.food + r.clothes + r.goods + r.medical + r.phone + r.allowance + r.events + r.leisure;
+  const all = (r: (typeof CHILD_LIVING)[number]) => r.food + r.clothes + r.goods + r.medical + r.phone + r.allowance + r.events + r.leisure;
   return (
     <div className="card flat stack" style={{ gap: 2 }}>
       <div className="row between micro">
-        <span>子供1人の生活費（月・平均）</span>
-        <span>うち食費</span>
+        <span>子供1人の生活費（月）</span>
+        <span>うち食費 / 衣類・日用品</span>
       </div>
       {rows.map(([l, from, to]) => (
         <div key={l} className="row between" style={{ fontSize: 'var(--fs-s)' }}>
           <span>{l}</span>
           <span>
             <b className="num">{yen(avg(from, to, all))}</b>
-            <span className="micro"> / {yen(avg(from, to, (r) => r.food))}</span>
+            <span className="micro">
+              {' '}
+              / {yen(avg(from, to, (r) => r.food))} / {yen(avg(from, to, (r) => r.clothes + r.goods))}
+            </span>
           </span>
         </div>
       ))}
-      <div className="micro" style={{ lineHeight: 1.5 }}>食費・衣類・日用品・医療・携帯・おこづかい・行事・レジャー（教育費と貯金は別に計算）。出典: {CHILD_COST_SOURCE}</div>
+      <div className="micro" style={{ lineHeight: 1.5 }}>教育費と貯金は別に計算。出典: {CHILD_LIVING_SOURCE}</div>
     </div>
   );
 }
@@ -1779,9 +1782,9 @@ export function AssumptionsSection({ initial }: { initial?: 'eco' | 'life' | 'ki
           </>
         ) : (
           <>
-            <div className="micro">子供が増えると、年齢・学年に合わせて食費・日用品などを自動で足します（1人あたり・全国調査の平均）。家計に合わせて水準を変えられます。</div>
+            <div className="micro">子供が増えると、年齢・学年に合わせて食費・衣類・日用品などを自動で足します（1人あたり。食費・衣類・日用品は家計調査をもとにした標準的な家計の増え方）。家計に合わせて水準を変えられます。</div>
             <ChildCostTable scale={a.childCostScale ?? 1} />
-              <NumField label="子供の生活費の水準" unit="%" scale={100} nullable={false} min={30} max={200} value={a.childCostScale ?? 1} onChange={(v) => set((x) => void (x.childCostScale = v ?? 1))} hint="全国平均を100%" />
+              <NumField label="子供の生活費の水準" unit="%" scale={100} nullable={false} min={30} max={200} value={a.childCostScale ?? 1} onChange={(v) => set((x) => void (x.childCostScale = v ?? 1))} hint="標準を100%" />
           </>
         )
       }

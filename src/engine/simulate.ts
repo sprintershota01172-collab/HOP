@@ -1,5 +1,5 @@
 import { buildSchedule, ratePath, type LoanSchedule } from './loan';
-import { ASSUME, CHILD_ALLOWANCE, CHILD_COST, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, LUNCH_RELIEF_FROM } from './reference';
+import { ASSUME, CHILD_ALLOWANCE, CHILD_LIVING, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, LUNCH_RELIEF_FROM } from './reference';
 import { FUKUSHOKU_EXEMPT_BELOW, NATIONAL, nurseryFee, REGIONS, residentIncomeTax, type RegionInfo } from './region';
 import { annuityPayment } from './loan';
 import type { Resolved, RPerson } from './resolve';
@@ -176,7 +176,7 @@ export const CHILD_LIVING_LABEL = { food: '食費', wear: '衣類・日用品', 
 export type ChildLivingPart = keyof typeof CHILD_LIVING_LABEL;
 
 /**
- * 子供1人のその月の生活費（物価補正前の今の価値・月額）。0〜6歳は年齢、小学生以降は学年で、調査の平均を使う。
+ * 子供1人のその月の生活費（物価補正前の今の価値・月額）。0〜6歳は年齢、小学生以降は学年で、食費・衣類・日用品は標準生計費・家計調査、そのほかは子育て費用の調査の平均（reference.ts の CHILD_LIVING）。
  * 大学生は高3と同じ（自宅外で仕送りがある場合は0。仕送りは教育費に入れる）。
  */
 export function childLivingOf(c: Child, m: YM, scale = 1): Record<ChildLivingPart, number> {
@@ -184,10 +184,10 @@ export function childLivingOf(c: Child, m: YM, scale = 1): Record<ChildLivingPar
   if (m < c.birthYM) return z;
   const g = gradeAt(c.birthYM, m);
   const univEnd = 12 + (c.univ === 'none' ? 0 : c.univYears);
-  let row: (typeof CHILD_COST)[number] | null = null;
-  if (g <= 0) row = CHILD_COST[Math.min(6, Math.max(0, Math.floor((m - c.birthYM) / 12)))];
-  else if (g <= 12) row = CHILD_COST[6 + g];
-  else if (g <= univEnd && c.univAwayMonthly <= 0) row = CHILD_COST[18];
+  let row: (typeof CHILD_LIVING)[number] | null = null;
+  if (g <= 0) row = CHILD_LIVING[Math.min(6, Math.max(0, Math.floor((m - c.birthYM) / 12)))];
+  else if (g <= 12) row = CHILD_LIVING[6 + g];
+  else if (g <= univEnd && c.univAwayMonthly <= 0) row = CHILD_LIVING[18];
   if (!row) return z;
   const k = scale / 12;
   return { food: row.food * k, wear: (row.clothes + row.goods) * k, misc: (row.medical + row.phone + row.allowance) * k, leisure: (row.events + row.leisure) * k };

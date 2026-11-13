@@ -281,7 +281,7 @@ export interface Assumptions {
   reserveMonths: number;
   /** 以前の版の子供の生活費（月額の目安）。今は使わない（childCostScale を使う） */
   childLiving: { preschool: Yen; elem: Yen; middleHigh: Yen; univ: Yen };
-  /** 子供の生活費（食費・衣類・日用品など）を調査の平均の何倍にするか（1 = 平均） */
+  /** 子供の生活費（食費・衣類・日用品など）を標準の何倍にするか（1 = 標準） */
   childCostScale?: number;
   /** 住む地域（保育料・給食費・学童・都市計画税が変わる）。null = 全国平均 */
   region?: import('./region').RegionKey | null;

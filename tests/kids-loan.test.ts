@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { uid } from '../src/engine/defaults';
 import { annuityPayment } from '../src/engine/loan';
 import { makeContext } from '../src/engine/recommend';
-import { CHILD_COST } from '../src/engine/reference';
+import { CHILD_COST, CHILD_LIVING } from '../src/engine/reference';
 import { resolvePlan } from '../src/engine/resolve';
 import { childLivingOf, simulate } from '../src/engine/simulate';
 import type { AppData, LifeEvent } from '../src/engine/types';
@@ -23,22 +23,36 @@ describe('子供の生活費（年齢・学年別）', () => {
 
   it('生まれる前は0、0歳は0歳の平均、3歳は3歳の平均', () => {
     assert.equal(sum(childLivingOf(c, toYM(2028, 5))), 0);
-    near(childLivingOf(c, toYM(2028, 6)).food, CHILD_COST[0].food / 12);
-    near(childLivingOf(c, toYM(2031, 7)).food, CHILD_COST[3].food / 12);
-    const r0 = CHILD_COST[0];
+    near(childLivingOf(c, toYM(2028, 6)).food, CHILD_LIVING[0].food / 12);
+    near(childLivingOf(c, toYM(2031, 7)).food, CHILD_LIVING[3].food / 12);
+    const r0 = CHILD_LIVING[0];
     near(childLivingOf(c, toYM(2028, 6)).wear, (r0.clothes + r0.goods) / 12);
   });
 
   it('小学校からは学年ごと（小1・中1・高3）', () => {
-    near(childLivingOf(c, toYM(2035, 4)).food, CHILD_COST[7].food / 12);
-    near(childLivingOf(c, toYM(2041, 4)).food, CHILD_COST[13].food / 12);
-    near(childLivingOf(c, toYM(2046, 4)).misc, (CHILD_COST[18].medical + CHILD_COST[18].phone + CHILD_COST[18].allowance) / 12);
+    near(childLivingOf(c, toYM(2035, 4)).food, CHILD_LIVING[7].food / 12);
+    near(childLivingOf(c, toYM(2041, 4)).food, CHILD_LIVING[13].food / 12);
+    near(childLivingOf(c, toYM(2046, 4)).misc, (CHILD_LIVING[18].medical + CHILD_LIVING[18].phone + CHILD_LIVING[18].allowance) / 12);
   });
 
   it('成長につれて食費が増える（0歳 < 小1 < 高3）', () => {
     const f = (ym: number) => childLivingOf(c, ym).food;
     assert.ok(f(toYM(2028, 6)) < f(toYM(2035, 4)));
     assert.ok(f(toYM(2035, 4)) < f(toYM(2046, 4)));
+  });
+
+  it('食費・衣類・日用品は統計に合わせる（子供1人の平均 = 標準生計費・家計調査の値）', () => {
+    const mean = (f: (r: (typeof CHILD_LIVING)[number]) => number) => CHILD_LIVING.reduce((t, r) => t + f(r), 0) / CHILD_LIVING.length / 12;
+    near(mean((r) => r.food), (88_750 - 48_320) / 3, 5);
+    near(mean((r) => r.clothes), (12_450 - 4_480) / 3, 5);
+    near(mean((r) => r.goods), 12_788 / 2.88, 5);
+    // 中学生の食費は月2万円未満、衣類は月5,000円未満（調査の平均の約半分・約4分の1）
+    for (const k of [13, 14, 15]) {
+      assert.ok(CHILD_LIVING[k].food / 12 < 20_000 && CHILD_LIVING[k].food < CHILD_COST[k].food * 0.6);
+      assert.ok(CHILD_LIVING[k].clothes / 12 < 5_000);
+    }
+    // 医療・携帯・おこづかい・行事・レジャーは調査の値のまま
+    for (let k = 0; k < CHILD_COST.length; k++) assert.equal(CHILD_LIVING[k].phone, CHILD_COST[k].phone);
   });
 
   it('水準（％）を変えると比例して変わる', () => {

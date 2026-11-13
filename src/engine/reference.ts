@@ -20,6 +20,8 @@ export interface Source {
 }
 
 export const CHECKED = '2026-10-28';
+/** 子供の生活費の出典を確かめた日 */
+export const CHECKED_CHILD = '2026-11-13';
 
 export const SOURCES: Source[] = [
   {
@@ -70,7 +72,37 @@ export const SOURCES: Source[] = [
     published: '2026',
     checked: CHECKED,
     kind: 'stat',
-    note: '0〜6歳は年齢別、小1〜高3は学年別の年額（食費・衣類・生活用品・医療・携帯・おこづかい・行事・レジャー）を子供の生活費に使用。教育費は文部科学省の学習費調査で別に計算。',
+    note: '0〜6歳は年齢別、小1〜高3は学年別の年額。医療・携帯・おこづかい・行事・レジャーはこの値を使い、食費・衣類・日用品は年齢による増え方（形）だけを使う（金額は下の標準生計費・家計調査に合わせる）。教育費は文部科学省の学習費調査で別に計算。',
+  },
+  {
+    id: 'jinji-std-r7',
+    title: '令和7年4月の標準生計費（費目別、世帯人員別）',
+    org: '人事院（総務省「家計調査」などから算定）',
+    url: 'https://www.jinji.go.jp/content/000011703.pdf',
+    published: '2025-08',
+    checked: CHECKED_CHILD,
+    kind: 'stat',
+    note: '食料費 2人48,320円・3人61,800円・4人75,270円・5人88,750円、被服・履物費 2人4,480円〜5人12,450円（月）。世帯が1人増えるごとの増え方（食料費 約13,480円、被服・履物費 約2,660円）を子供1人の平均にする。',
+  },
+  {
+    id: 'mhlw-dri-2025',
+    title: '日本人の食事摂取基準（2025年版）推定エネルギー必要量',
+    org: '厚生労働省（堺市・農林水産省の資料で照合。0〜9歳は2020年版の値）',
+    url: 'https://www.city.sakai.lg.jp/kenko/kenko/kenkozoshin/eiyo/eiyoseibun/ichinichi.html',
+    published: '2024-10',
+    checked: CHECKED_CHILD,
+    kind: 'guide',
+    note: '身体活動レベル「ふつう」の男女平均。子供の食費を年齢で分ける比率に使う（0歳 約590kcal → 中学生 2,500kcal・高校生 2,575kcal。30〜49歳の大人は2,400kcal）。',
+  },
+  {
+    id: 'kakei-2024',
+    title: '家計調査 2024年平均（二人以上の世帯）',
+    org: '総務省統計局',
+    url: 'https://www.stat.go.jp/data/kakei/sokuhou/tsuki/pdf/fies_gaikyo2024.pdf',
+    published: '2025-02',
+    checked: CHECKED_CHILD,
+    kind: 'stat',
+    note: '家具・家事用品 月12,788円（平均世帯人員2.88人）。1人あたり約4,440円を子供1人の日用品の平均にする。',
   },
   {
     id: 'mext-lunch-relief',
@@ -486,6 +518,51 @@ export const CHILD_COST: { food: number; clothes: number; goods: number; medical
   { food: 544_724, clothes: 141_008, goods: 172_871, medical: 18_437, phone: 124_644, allowance: 75_090, events: 12_302, leisure: 78_805 },
   { food: 476_571, clothes: 128_463, goods: 168_780, medical: 17_600, phone: 120_987, allowance: 77_881, events: 16_226, leisure: 55_622 },
 ];
+
+/**
+ * 子供の食費・衣類・日用品の基準（月額・円）。
+ * 子育て費用の調査（母親の回答の平均）は、家計調査をもとにした標準生計費の「1人増えたときの増え方」より
+ * 食費で約2倍、衣類で約4倍高く、ふつうの家計より高く出るため、金額は公的統計に合わせる。
+ *  - 食費: 標準生計費（人事院 令和7年4月）の世帯が1人増えるごとの食料費 × 年齢ごとの推定エネルギー必要量の比
+ *  - 衣類: 標準生計費の世帯が1人増えるごとの被服・履物費 × 調査の年齢ごとの比
+ *  - 日用品: 家計調査（2024年）の家具・家事用品の1人あたり × 調査の年齢ごとの比
+ * 比は0歳〜高3の平均が1になるようにする（子供1人の平均が統計の値と一致）。
+ */
+export const CHILD_STD = {
+  /** 標準生計費（令和7年4月）2〜5人世帯の食料費・被服履物費（月） */
+  stdFood: [48_320, 61_800, 75_270, 88_750],
+  stdClothes: [4_480, 7_140, 9_800, 12_450],
+  /** 家計調査 2024年 二人以上の世帯: 家具・家事用品（月）と平均世帯人員 */
+  kakeiGoods: 12_788,
+  kakeiMembers: 2.88,
+  /** 推定エネルギー必要量（ふつう・男女平均 kcal/日）。CHILD_COST の行（0〜6歳、小1〜高3）ごと */
+  kcal: [588, 925, 925, 1_275, 1_275, 1_275, 1_500, 1_500, 1_500, 1_775, 1_775, 2_175, 2_175, 2_500, 2_500, 2_500, 2_575, 2_575, 2_575],
+  /** 30〜49歳の大人（男女平均）。表示用 */
+  adultKcal: 2_400,
+} as const;
+
+const perMember = (a: readonly number[]) => (a[a.length - 1] - a[0]) / (a.length - 1);
+const meanOf = (a: readonly number[]) => a.reduce((t, x) => t + x, 0) / a.length;
+/** 子供1人の平均（月）: 食費・衣類・日用品 */
+export const CHILD_STD_AVG = {
+  food: perMember(CHILD_STD.stdFood),
+  clothes: perMember(CHILD_STD.stdClothes),
+  goods: CHILD_STD.kakeiGoods / CHILD_STD.kakeiMembers,
+};
+
+/** 子供の生活費（年額・円）。CHILD_COST の食費・衣類・日用品を統計に合わせたもの。それ以外は調査の値のまま */
+export const CHILD_LIVING: (typeof CHILD_COST)[number][] = (() => {
+  const kc = meanOf(CHILD_STD.kcal);
+  const cl = meanOf(CHILD_COST.map((r) => r.clothes));
+  const gd = meanOf(CHILD_COST.map((r) => r.goods));
+  return CHILD_COST.map((r, i) => ({
+    ...r,
+    food: Math.round(CHILD_STD_AVG.food * (CHILD_STD.kcal[i] / kc) * 12),
+    clothes: Math.round(CHILD_STD_AVG.clothes * (r.clothes / cl) * 12),
+    goods: Math.round(CHILD_STD_AVG.goods * (r.goods / gd) * 12),
+  }));
+})();
+export const CHILD_LIVING_SOURCE = '食費・衣類は人事院「標準生計費」（令和7年4月）、食費の年齢差は厚生労働省「日本人の食事摂取基準」、日用品は総務省「家計調査」2024年、医療・携帯・おこづかい・行事・レジャーは竹原ほか「0〜18歳の子育てに要する費用の調査2024」';
 
 /* ---------- アプリの仮定（ユーザーが変更できる初期値） ---------- */
 export const ASSUME = {
