@@ -743,3 +743,8 @@ button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600
 /* 0円の項目は薄く（項目の数を変えず、円グラフの位置を固定する） */
 .legend button.li.zero { opacity: 0.45; }
 .donut-wrap { align-items: start; }
+
+/* 生活費の内訳のまとまり */
+.iconbtn.sm { width: 28px; height: 26px; flex: none; }
+.iconbtn.sm svg { width: 16px; height: 16px; }
+.wf .ln .nm .cnt { font-style: normal; font-weight: 400; font-size: var(--fs-xs); color: var(--ink-3); margin-left: 6px; }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { DetailRow, PieKind, PieSlice, SplitKey } from '../../engine/aggregate';
+import { groupLiving, type DetailRow, type PieKind, type PieSlice, type SplitKey } from '../../engine/aggregate';
 import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
 import { AssetChart, Donut, IncomeSplit, MonthAssetChart, PERSON_COLOR, SLICE_COLOR, YearBars } from '../components/charts';
 import { Badge, Kpi, Money } from '../components/bits';
@@ -193,6 +193,8 @@ function Result() {
               income={pie.income}
               months={pie.months}
               year={year}
+              children={s.data.plan.children}
+              factor={Math.pow(1 + s.data.plan.assumptions.inflation, year - startY)}
             />
             <Happenings year={year} />
             {pie.detail.fundPaid.length > 0 && (
@@ -343,7 +345,7 @@ function Happenings({ year }: { year: number }) {
 }
 
 /** 選んだ項目の内訳（月平均）。行をタップすると、その金額の入力画面を開く */
-function Detail({ sel, label, value, rows, income, months, year }: { sel: Sel; label: string; value: number; rows: DetailRow[]; income: number; months: number; year: number }) {
+function Detail({ sel, label, value, rows: all, income, months, year, children, factor }: { sel: Sel; label: string; value: number; rows: DetailRow[]; income: number; months: number; year: number; children: { id: string; name: string }[]; factor: number }) {
   const s = useStore();
   const rest = sel === 'rest';
   const inc = sel === 'income';
@@ -351,16 +353,29 @@ function Detail({ sel, label, value, rows, income, months, year }: { sel: Sel; l
   const calc = rest || inc;
   const short = typeof window !== 'undefined' && window.innerHeight <= 700;
   const fit = useFit<HTMLDivElement>(short ? 25.5 : 29.5, 3, 1);
-  const pg = usePages(rows, Math.max(1, fit.n));
+  // 生活費は「大人の生活費・お小遣い・子供ごと」のまとまりで先に見せ、タップでその中の項目を開く
+  const groups = sel === 'living' ? groupLiving(all, children) : [];
+  const grouped = groups.length > 1;
+  const [open, setOpen] = useState<string | null>(null);
+  const og = grouped && open ? groups.find((g) => g.key === open) ?? null : null;
+  const rows = og ? og.rows : all;
+  const pg = usePages<DetailRow | (typeof groups)[number]>(grouped && !og ? groups : rows, Math.max(1, fit.n));
+  // 物価上昇で増える項目（生活費・教育費）は、今の価値も出す
+  const real = (sel === 'living' || sel === 'education') && factor > 1.005 ? (og ? og.value : value) / factor : null;
   return (
     <div className="stack fill detail" style={{ gap: 2 }}>
       <div className="row" style={{ gap: 6 }}>
-        <span className="label ellipsis grow" style={{ fontWeight: 700 }}>
-          <Badge mark={inc ? MARK.income : SLICE_MARK[sel]} size={18} />
-          {rest ? `残額の計算（収入 ${yen(income)}）` : `${label}の内訳`}
+        {og && (
+          <button className="iconbtn sm" onClick={() => { setOpen(null); pg.setPage(0); }} aria-label="生活費の内訳にもどる">
+            <Icon name="left" />
+          </button>
+        )}
+        <span className="label ellipsis grow" style={{ fontWeight: 700 }} title={real != null ? `物価上昇（年${(s.data.plan.assumptions.inflation * 100).toFixed(1)}%）で${factor.toFixed(2)}倍になった額。今の価値では約${yen(Math.round(real))}` : undefined}>
+          {!og && <Badge mark={inc ? MARK.income : SLICE_MARK[sel]} size={18} />}
+          {rest ? `残額の計算（収入 ${yen(income)}）` : og ? `${og.label} ${yen(og.value)}` : `${label}の内訳`}
           <small className="micro" style={{ fontWeight: 400 }}>
             {' '}
-            {year}年・月平均{months < 12 ? `（${months}か月）` : ''}
+            {real != null ? `今の価値で約${yen(real)}・` : `${year}年・`}月平均{months < 12 ? `（${months}か月）` : ''}
             {rows.some((r) => r.once || r.span) ? `・合計÷${months}か月` : ''}
           </small>
         </span>
@@ -381,9 +396,22 @@ function Detail({ sel, label, value, rows, income, months, year }: { sel: Sel; l
       </div>
       {rows.length === 0 ? (
         <div className="empty fill">{year}年は{label}がありません</div>
+      ) : grouped && !og ? (
+        <div className="wf fill" ref={fit.ref}>
+          {(pg.slice as unknown as typeof groups).map((g) => (
+            <button key={g.key} className="ln noop" onClick={() => { setOpen(g.key); pg.setPage(0); }} aria-label={`${g.label}の内訳を見る`}>
+              <span className="nm ellipsis">
+                {g.label}
+                <em className="cnt">{g.rows.length}項目</em>
+              </span>
+              <span className="v">{yen(g.value)}</span>
+              <Icon name="right" />
+            </button>
+          ))}
+        </div>
       ) : (
         <div className="wf fill" ref={fit.ref}>
-          {pg.slice.map((r) => (
+          {(pg.slice as unknown as DetailRow[]).map((r) => (
             <button key={r.key} className={`ln${calc ? '' : ' noop'}`} disabled={!r.sheet} onClick={() => r.sheet && s.open({ kind: r.sheet, props: r.props ?? {} })}>
               {inc ? (
                 <span className="op">

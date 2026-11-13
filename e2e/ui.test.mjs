@@ -340,8 +340,20 @@ describe('入力・保存・再計算', () => {
       assert.deepEqual(r.clipped, [], `${k}: 中身が切れている部品`);
       assert.ok(r.docW <= r.iw);
     }
-    // 生活費の内訳 → お小遣いの行（ページ送り）→ 入力を開く
-    let row = page.locator('.detail .ln:has-text("お小遣い")').first();
+    // 生活費の内訳はまとまり（大人の生活費・お小遣い・子供ごと）で出て、合計は生活費と一致する
+    const groupSum = await page.$$eval('.detail .ln .v', (els) => els.map((e) => e.textContent));
+    assert.ok(groupSum.length >= 1, '生活費のまとまりが出る');
+    // お小遣い・自由費のまとまり（ページ送り）→ 中の「お小遣い」の行 → 入力を開く
+    let row = page.locator('.detail .ln:has-text("お小遣い・自由費")').first();
+    for (let i = 0; i < 20 && !(await row.count()); i++) {
+      await page.click('.detail .minipager button[aria-label="次のページ"]');
+      await page.waitForTimeout(150);
+    }
+    await row.click();
+    await page.waitForTimeout(300);
+    assert.ok((await page.locator('.detail .label').first().textContent()).includes('お小遣い・自由費'), 'まとまりの中を開く');
+    assert.deepEqual((await layoutReport(page)).clipped, [], 'まとまりの中: 中身が切れている部品');
+    row = page.locator('.detail .ln:has-text("のお小遣い")').first();
     for (let i = 0; i < 20 && !(await row.count()); i++) {
       await page.click('.detail .minipager button[aria-label="次のページ"]');
       await page.waitForTimeout(150);
@@ -357,10 +369,17 @@ describe('入力・保存・再計算', () => {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
     await page.click('.legend button:has-text("生活費")');
-    while (await page.locator('.detail .minipager button[aria-label="前のページ"]:not([disabled])').count()) {
-      await page.click('.detail .minipager button[aria-label="前のページ"]');
-      await page.waitForTimeout(100);
+    if (await page.locator('.detail button[aria-label="生活費の内訳にもどる"]').count()) {
+      await page.click('.detail button[aria-label="生活費の内訳にもどる"]');
+      await page.waitForTimeout(150);
     }
+    row = page.locator('.detail .ln:has-text("お小遣い・自由費")').first();
+    for (let i = 0; i < 20 && !(await row.count()); i++) {
+      await page.click('.detail .minipager button[aria-label="次のページ"]');
+      await page.waitForTimeout(150);
+    }
+    await row.click();
+    await page.waitForTimeout(300);
     row = page.locator('.detail .ln:has-text("自由費")');
     for (let i = 0; i < 20 && !(await row.count()); i++) {
       await page.click('.detail .minipager button[aria-label="次のページ"]');

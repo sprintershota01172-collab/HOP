@@ -326,3 +326,43 @@ export function monthPies(sim: SimResult, years: YearRow[]): MonthPie[][] {
   }
   return out;
 }
+
+/** 内訳のまとまり（生活費を「大人の生活費・お小遣い・子供ごと」に分ける） */
+export interface DetailGroup {
+  key: string;
+  label: string;
+  value: Yen;
+  rows: DetailRow[];
+}
+
+/**
+ * 生活費の内訳を、まとまりごとに合計する（合計は元の行の合計と一致）。
+ * 行の key: item:… = 入力した生活費、pocket:… = お小遣い・自由費、child:<子供のid>:… = 子供の生活費、retire = 老後の生活費
+ */
+export function groupLiving(rows: DetailRow[], children: { id: string; name: string }[]): DetailGroup[] {
+  const groups = new Map<string, DetailGroup>();
+  const order: string[] = ['item', 'pocket', ...children.map((c) => `child:${c.id}`), 'retire', 'other'];
+  const labelOf = (k: string) => {
+    if (k === 'item') return '大人の生活費';
+    if (k === 'pocket') return 'お小遣い・自由費';
+    if (k === 'retire') return '老後の生活費';
+    if (k.startsWith('child:')) {
+      const c = children.find((x) => `child:${x.id}` === k);
+      return `${c?.name || '子供'}の生活費`;
+    }
+    return 'その他';
+  };
+  for (const r of rows) {
+    let k = 'other';
+    if (r.key.startsWith('item:')) k = 'item';
+    else if (r.key.startsWith('pocket:')) k = 'pocket';
+    else if (r.key === 'retire') k = 'retire';
+    else if (r.key.startsWith('child:')) k = `child:${r.key.split(':')[1]}`;
+    const g = groups.get(k) ?? { key: k, label: labelOf(k), value: 0, rows: [] };
+    g.value += r.value;
+    g.rows.push(r);
+    groups.set(k, g);
+  }
+  const rank = (k: string) => (order.indexOf(k) < 0 ? order.length : order.indexOf(k));
+  return [...groups.values()].sort((a, b) => rank(a.key) - rank(b.key));
+}
