@@ -2,6 +2,7 @@
  * 画面に渡す計算結果（シリアライズ可能・必要な分だけ）。
  * Web Worker 内でも、メインスレッドでも同じ関数を使う。
  */
+import { housingTaxView, type HousingTaxView } from './housetax';
 import { monthPies, type MonthPie, type YearRow } from './aggregate';
 import { afterPurchase, breakdown, levers, scenarioChecks, type AfterPurchase, type Breakdown, type Lever, type ScenarioCheck } from './explain';
 import { goalStatus, type GoalStatus } from './goals';
@@ -102,6 +103,8 @@ export interface ViewModel {
   /** ローン画面の初期表示（推奨額・条件の変更なし） */
   loanBase: LoanView | null;
   houses: HouseView[];
+  /** 目指す予算で買った場合の諸費用・税・住宅ローン控除の見込み */
+  housingTax: HousingTaxView | null;
   /** 自己資金の算出に使った値 */
   downInfo: { cashBefore: Yen; needWithRent: Yen; gift: Yen; moving: Yen } | null;
   fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; list: MonthPie[] }[]; goals: GoalStatus[]; warnings: SimWarning[] } | null;
@@ -182,6 +185,7 @@ export function computeView(data: AppData): ViewModel {
     checks: scenarioChecks(c.rec),
     loanBase: c.rec.ctx ? computeLoan({ loan: c.rec.final.loan, whatIf: { rateDelta: 0, incomeCut: 0, years: null } }) : null,
     houses,
+    housingTax: c.rec.ready && c.rec.final.loan + c.rec.final.down > 0 ? housingTaxView(r, c.rec.sim) : null,
     downInfo: c.rec.ctx
       ? { cashBefore: c.rec.ctx.cashBefore, needWithRent: c.rec.ctx.needWithRent, gift: data.plan.housing.gift, moving: data.plan.housing.movingCost ?? 0 }
       : null,

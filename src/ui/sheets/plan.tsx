@@ -6,7 +6,7 @@
 import type { ReactNode } from 'react';
 import React, { useMemo, useState } from 'react';
 import { emptyPerson, LIVING_PRESETS, LIVING_STD, newChild, uid } from '../../engine/defaults';
-import { CHILD_LIVING, CHILD_LIVING_SOURCE, EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
+import { CHILD_LIVING, CHILD_LIVING_SOURCE, EDU_JUKU, GIFT_TAX, EDU_LUNCH, EDU_MEXT, EDU_UNIV, LEAVE, NISA_NOTE, RETIRE_LIVING_COUPLE, SOURCES } from '../../engine/reference';
 import { NATIONAL, nurseryFee, REGION_KEYS, REGIONS, type RegionKey } from '../../engine/region';
 import { resolvePlan } from '../../engine/resolve';
 import { childCtxs, childMonth, eventMonths, householdIncomeTax, nurseryMonthlyOf, wageSeries, type IncomeOwner, type WorkState } from '../../engine/simulate';
@@ -1717,30 +1717,223 @@ export function HousingSection({ initial }: { initial?: 'now' | 'plan' | 'cost' 
           </>
         ) : page === 'cost' ? (
           <>
-            <div className="micro">登録した住宅に値がない場合と、予算の計算に使う目安です。</div>
-            <div className="grid2">
+            <Seg
+              label="購入時の諸費用"
+              value={h.miscMode ?? 'rate'}
+              onChange={(v) => set((x) => void (x.miscMode = v))}
+              options={[{ value: 'detail', label: '内訳で計算' }, { value: 'rate', label: '価格の割合' }]}
+            />
+            {(h.miscMode ?? 'rate') === 'detail' ? (
+              <div className="grid2">
+                <NumField label="融資手数料・保証料" unit="%" scale={100} nullable={false} min={0} max={5} value={h.loanFeeRate ?? 0.022} onChange={(v) => set((x) => void (x.loanFeeRate = v ?? 0.022))} hint="借入額に対して" />
+                <MoneyField label="外構・地盤改良など" nullable={false} value={h.extraCost ?? 0} onChange={(v) => set((x) => void (x.extraCost = v ?? 0))} />
+              </div>
+            ) : (
               <NumField label="諸費用（物件価格に対して）" unit="%" scale={100} nullable={false} min={0} max={20} value={h.miscRate} onChange={(v) => set((x) => void (x.miscRate = v ?? 0.07))} />
+            )}
+            <CostLink />
+            <div className="grid2">
               <NumField label="土地の割合" unit="%" scale={100} nullable={false} min={0} max={90} value={h.landShare} onChange={(v) => set((x) => void (x.landShare = v ?? 0.35))} />
+              <MoneyField label="駐車場" per="month" nullable={false} value={h.parkingMonthly} onChange={(v) => set((x) => void (x.parkingMonthly = v ?? 0))} />
             </div>
             <div className="grid2">
               <MoneyField label={h.kind === 'mansion' ? '管理費＋修繕積立金' : '修繕費の積立'} per="month" value={h.maintenanceMonthly} onChange={(v) => set((x) => void (x.maintenanceMonthly = v))} />
               <MoneyField label="火災・地震保険" per="year" value={h.insuranceAnnual} onChange={(v) => set((x) => void (x.insuranceAnnual = v))} />
             </div>
-            <MoneyField label="駐車場" per="month" nullable={false} value={h.parkingMonthly} onChange={(v) => set((x) => void (x.parkingMonthly = v ?? 0))} />
+            <div className="micro">外構・地盤改良などは物件価格に入っていない工事。ほかの項目は、登録した住宅に値がない場合と予算の計算に使う目安です。</div>
           </>
         ) : (
           <>
             <Toggle label="住宅ローン控除を計算に入れる" hint="初期設定はオフ（条件の確認が必要なため）" value={h.deduction.enabled} onChange={(v) => set((x) => void (x.deduction.enabled = v))} />
             <Seg label="住宅の省エネ性能" value={h.deduction.energy} onChange={(v) => set((x) => void (x.deduction.energy = v))} options={[{ value: 'longlife', label: '長期優良等' }, { value: 'zeh', label: 'ZEH水準' }, { value: 'standard', label: '省エネ基準' }, { value: 'other', label: 'その他' }]} />
-            <Seg label="世帯" value={h.deduction.family} onChange={(v) => set((x) => void (x.deduction.family = v))} options={[{ value: 'kosodate', label: '子育て・若者夫婦' }, { value: 'normal', label: 'その他' }]} />
-            <MoneyField label="控除に使える税額" hint="空欄は額面年収から推計" per="year" value={h.deduction.taxCapAnnual} onChange={(v) => set((x) => void (x.deduction.taxCapAnnual = v))} />
-            <Toggle label="新築住宅の固定資産税の減額" hint="3年間（長期優良住宅は5年間）建物分を1/2" value={h.newBuildTaxCut} onChange={(v) => set((x) => void (x.newBuildTaxCut = v))} />
+            <Seg label="子育て・若者夫婦世帯の上乗せ" value={h.deduction.family} onChange={(v) => set((x) => void (x.deduction.family = v))} options={[{ value: 'auto', label: '自動' }, { value: 'kosodate', label: 'あり' }, { value: 'normal', label: 'なし' }]} />
+            <MoneyField label="控除に使える税額" hint="空欄は年ごとの額面年収から推計（育休の年は少なく）" per="year" value={h.deduction.taxCapAnnual} onChange={(v) => set((x) => void (x.deduction.taxCapAnnual = v))} />
+            <Toggle label="新築住宅の固定資産税の減額" hint="戸建て3年・マンション5年（長期優良住宅は5年・7年）建物分を1/2" value={h.newBuildTaxCut} onChange={(v) => set((x) => void (x.newBuildTaxCut = v))} />
+            {h.gift > GIFT_TAX.basic && (
+              <Seg
+                label="援助の贈与税"
+                value={h.giftMode ?? 'exempt'}
+                onChange={(v) => set((x) => void (x.giftMode = v))}
+                options={[{ value: 'exempt', label: '住宅資金の非課税' }, { value: 'settlement', label: '相続時精算課税' }, { value: 'calendar', label: '110万円控除のみ' }]}
+              />
+            )}
+            <CostLink />
           </>
         )
       }
     </Paged>
   );
 }
+
+/** 「購入時の諸費用と税」を開くボタン（目指す予算で買った場合の見込み） */
+function CostLink() {
+  const s = useStore();
+  const t = s.vm?.housingTax;
+  return (
+    <button className="card item" style={{ minHeight: 0 }} onClick={() => s.open({ kind: 'houseTax', props: {} })} disabled={!t}>
+      <div className="grow micro" style={{ lineHeight: 1.6 }}>
+        <b style={{ color: 'var(--ink)' }}>購入時の諸費用と税の内訳</b>
+        <br />
+        {t
+          ? `諸費用 ${yen(t.misc)}（内訳で計算すると ${yen(t.detailNow)}）${t.acqTax ? `・半年後に不動産取得税 ${yen(t.acqTax)}` : ''}${t.deduction ? `・ローン控除 ${t.deduction.years}年で ${yen(t.deduction.total)}` : ''}`
+          : '予算を計算すると表示します'}
+      </div>
+      <Icon name="right" size={16} />
+    </button>
+  );
+}
+
+/** 購入時の諸費用と税・住宅ローン控除・固定資産税の見込み（目指す予算で買った場合） */
+export function HouseTaxSheet({ close }: SheetProps) {
+  const s = useStore();
+  const t = s.vm?.housingTax;
+  const up = (fn: (h: Plan['housing']) => void) => s.update((d) => void (fn(d.plan.housing), (d.sample = false)));
+  return (
+    <Sheet title="購入時の諸費用と税" onClose={close} foot={<Done close={close} />}>
+      {!t ? (
+        <div className="micro">予算を計算すると表示します。</div>
+      ) : (
+        <Paged
+          pages={[
+            { value: 'misc', label: '諸費用' },
+            { value: 'ded', label: 'ローン控除' },
+            { value: 'prop', label: '固定資産税' },
+            { value: 'todo', label: '手続き' },
+          ]}
+        >
+          {(page) =>
+            page === 'misc' ? (
+              <>
+                <div className="micro" style={{ lineHeight: 1.6 }}>
+                  目指す予算（物件 {yen(t.price)}・借入 {yen(t.loan)}）で{ymText(t.purchaseYM)}に買った場合の目安です。火災・地震保険は維持費で毎年計上しています。
+                </div>
+                <div className="card" style={{ padding: '2px var(--pad)' }}>
+                  <table className="table">
+                    <tbody>
+                      {t.items.map((x) => (
+                        <tr key={x.key}>
+                          <td style={{ fontFamily: 'var(--font)', whiteSpace: 'normal' }}>
+                            {x.label}
+                            {x.when === 'later' && <span className="kind" style={{ marginLeft: 4 }}>後日</span>}
+                            {x.note && <div className="micro">{x.note}</div>}
+                          </td>
+                          <td>{yen(x.value)}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td style={{ fontFamily: 'var(--font)', fontWeight: 700 }}>購入時に払う諸費用（内訳の合計）</td>
+                        <td style={{ fontWeight: 700 }}>{yen(t.detailNow)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="micro" style={{ lineHeight: 1.6 }}>
+                  {t.mode === 'detail'
+                    ? `計算には内訳の合計を使っています（物件価格の${pct(t.detailNow / Math.max(1, t.price))}）。不動産取得税は${ymText(t.acqTaxYM)}の支出です。`
+                    : `計算には価格の割合（${yen(t.rateMisc)}・不動産取得税を含む）を使っています。`}
+                </div>
+                {t.mode === 'rate' && (
+                  <button className="btn" onClick={() => up((h) => void (h.miscMode = 'detail'))}>
+                    内訳で計算する
+                  </button>
+                )}
+              </>
+            ) : page === 'ded' ? (
+              t.deduction ? (
+                <>
+                  <div className="micro" style={{ lineHeight: 1.6 }}>
+                    {t.deduction.enabled ? '計算に入れています。' : '計算には入れていません（入れた場合の見込み）。'}
+                    限度額 {yen(t.deduction.limit)}（{t.deduction.family === 'kosodate' ? '子育て・若者夫婦世帯' : '一般'}）× {t.deduction.years}年、年末残高の0.7%。
+                    合計 <b>{yen(t.deduction.total)}</b>
+                    {t.deduction.unused > 0 && <>（税が足りず引ききれない分 {yen(t.deduction.unused)}）</>}
+                    {t.deduction.note && <>。{t.deduction.note}</>}
+                  </div>
+                  <div className="card" style={{ padding: '2px var(--pad)' }}>
+                    <table className="table compact">
+                      <thead>
+                        <tr>
+                          <th>年</th>
+                          <th>年末残高</th>
+                          <th>所得税</th>
+                          <th>住民税</th>
+                          <th>引ききれず</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {t.deduction.list.map((x) => (
+                          <tr key={x.year}>
+                            <td>{x.year}</td>
+                            <td>{yen(x.balance)}</td>
+                            <td>{yen(x.incomeTax)}</td>
+                            <td>{yen(x.resident)}</td>
+                            <td className={x.unused > 0 ? 'neg' : undefined}>{x.unused > 0 ? yen(x.unused) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="micro">所得税の分は12月の年末調整（初年度は翌年3月の確定申告）で戻り、残りは翌年6月から1年間の住民税が減ります。</div>
+                </>
+              ) : (
+                <div className="micro">借入がないため控除はありません。</div>
+              )
+            ) : page === 'prop' ? (
+              <>
+                <div className="card" style={{ padding: '2px var(--pad)' }}>
+                  <table className="table compact">
+                    <thead>
+                      <tr>
+                        <th>年</th>
+                        <th>土地</th>
+                        <th>建物</th>
+                        <th>合計（年）</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {t.propertyTax.map((x) => (
+                        <tr key={x.year}>
+                          <td>
+                            {x.year}
+                            {x.cut && <span className="kind" style={{ marginLeft: 4 }}>減額</span>}
+                          </td>
+                          <td>{yen(x.land)}</td>
+                          <td>{yen(x.building)}</td>
+                          <td>{yen(x.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="micro" style={{ lineHeight: 1.6 }}>
+                  固定資産税1.4%＋都市計画税（住む地域の税率）。土地は200㎡まで1/6（都市計画税1/3）。新築の建物は完成の翌年から課税され、評価は3年ごとの評価替えで下がります。納税通知書が届いたら住宅の「固定資産税」に入力すると置き換わります。
+                </div>
+              </>
+            ) : (
+              <>
+                {t.gift && (
+                  <div className="card stack" style={{ gap: 2 }}>
+                    <div className="micro">
+                      <b style={{ color: 'var(--ink)' }}>援助 {yen(t.gift.amount)} の贈与税</b>：{t.gift.tax > 0 ? <span className="neg">{yen(t.gift.tax)}（翌年3月に払う計算）</span> : '0円'}
+                      {t.gift.exempt > 0 && `（非課税 ${yen(t.gift.exempt)}）`}
+                    </div>
+                  </div>
+                )}
+                <div className="card stack" style={{ gap: 6 }}>
+                  {t.notes.map((n, i) => (
+                    <div key={i} className="micro" style={{ lineHeight: 1.6 }}>
+                      ・{n}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
+          }
+        </Paged>
+      )}
+    </Sheet>
+  );
+}
+
 export const HousingSheet = ({ close, props }: SheetProps) => (
   <Sheet title="住まい・購入計画" onClose={close} preview foot={<Done close={close} />}>
     <HousingSection initial={(props.page as 'now' | 'plan' | 'cost' | 'tax') ?? 'plan'} />

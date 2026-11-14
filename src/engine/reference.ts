@@ -22,6 +22,8 @@ export interface Source {
 export const CHECKED = '2026-10-28';
 /** 子供の生活費の出典を確かめた日 */
 export const CHECKED_CHILD = '2026-11-13';
+/** 住宅の税（登録免許税・不動産取得税・印紙税・贈与税・住宅ローン控除の限度額）を確かめた日 */
+export const CHECKED_TAX = '2026-11-14';
 
 export const SOURCES: Source[] = [
   {
@@ -336,13 +338,23 @@ export const SOURCES: Source[] = [
   },
   {
     id: 'mortgage-r8',
-    title: '令和8年度税制改正 住宅ローン減税の延長・拡充',
+    title: '住宅ローン減税（令和8年度改正）の説明資料',
     org: '国土交通省',
-    url: 'https://www.mlit.go.jp/report/press/house02_hh_000241.html',
-    published: '2025-12-26（法成立 2026-03-31）',
-    checked: CHECKED,
+    url: 'https://www.mlit.go.jp/jutakukentiku/house/content/001976453.pdf',
+    published: '2026-06',
+    checked: CHECKED_TAX,
     kind: 'law',
-    note: '2030年末入居まで5年延長。控除率0.7%。借入限度額（新築）は認定4,500万円（子育て等5,000万円）、ZEH水準3,500万円（4,500万円）、省エネ基準2,000万円（3,000万円）を山田&パートナーズの解説で照合。限度額表の一次資料（別紙）は未取得のため、控除は初期設定で計算に含めない。',
+    note: '2030年末入居まで。控除率0.7%。新築: 長期優良・低炭素4,500万円（子育て・若者夫婦世帯5,000万円）、ZEH水準3,500万円（4,500万円）、省エネ基準2,000万円（3,000万円）×13年（2028年以降の入居は2027年末までに建築確認のもの 2,000万円×10年）。中古: 長期優良・ZEH水準3,500万円（4,500万円）・省エネ基準2,000万円（3,000万円）×13年、その他2,000万円×10年。床面積40㎡以上（上乗せは50㎡以上）。住民税から引けるのは所得税の課税総所得金額等の5%（上限97,500円）。初期設定では計算に含めない（オンで計算）。',
+  },
+  {
+    id: 'income-tax-r8',
+    title: '令和8年度税制改正（基礎控除・給与所得控除の見直し）',
+    org: '三井のリハウス「不動産・住宅税金の手引き」',
+    url: 'https://www.rehouse.co.jp/mtebiki/new/',
+    published: '2026',
+    checked: CHECKED_TAX,
+    kind: 'law',
+    note: '所得税の基礎控除（2026・2027年）: 合計所得489万円以下104万円、655万円以下67万円、2,350万円以下62万円。給与所得控除の最低額74万円。新築住宅の固定資産税の減額は5年延長、床面積の要件は40〜240㎡に。住宅ローン控除に使える税額の推計に使用。',
   },
   {
     id: 'nisa-r8',
@@ -382,17 +394,67 @@ export const SOURCES: Source[] = [
     published: '—',
     checked: CHECKED,
     kind: 'guide',
-    note: '新築一戸建て 物件価格の約7〜8%、中古 約6〜10%（仲介手数料込み）。',
+    note: '新築一戸建て 物件価格の約7〜8%、中古 約6〜10%（仲介手数料込み）。「価格の割合」で計算するときの初期値。内訳で計算するときは、司法書士12万円・表示登記10万円・融資手数料2.2%を目安に置く。',
+  },
+  {
+    id: 'registration-tax',
+    title: '住宅用家屋の登録免許税の軽減',
+    org: '財務省',
+    url: 'https://www.mof.go.jp/tax_policy/summary/property/e08.htm',
+    published: '—',
+    checked: CHECKED_TAX,
+    kind: 'law',
+    note: '所有権保存0.15%（長期優良・低炭素0.1%）、建物の移転0.3%、抵当権設定0.1%（2027年3月31日まで）。土地の売買による移転1.5%（2029年3月31日まで、国土交通省「土地の取得に係る税制の概要」）。',
+  },
+  {
+    id: 'acquisition-tax',
+    title: '土地の取得に係る税制の概要（不動産取得税）',
+    org: '国土交通省',
+    url: 'https://www.mlit.go.jp/totikensangyo/totikensangyo_tk5_000072.html',
+    published: '—',
+    checked: CHECKED_TAX,
+    kind: 'law',
+    note: '税率3%（本則4%）・宅地の課税標準1/2（2027年3月31日まで）。新築住宅は評価額から1,200万円（認定長期優良住宅1,300万円）を控除。住宅の土地は「4.5万円」と「1㎡あたりの価格×床面積の2倍（200㎡まで）×3%」の多い方を減額。',
+  },
+  {
+    id: 'stamp-tax',
+    title: '不動産売買契約書・建設工事請負契約書の印紙税の軽減',
+    org: '国税庁',
+    url: 'https://www.nta.go.jp/taxes/shiraberu/taxanswer/inshi/7108.htm',
+    published: '—',
+    checked: CHECKED_TAX,
+    kind: 'law',
+    note: '2027年3月31日まで軽減（1,000万円超5,000万円以下 1万円、5,000万円超1億円以下 3万円）。ローンの契約書（金銭消費貸借）は軽減なし（1,000万円超5,000万円以下 2万円）。',
+  },
+  {
+    id: 'gift-housing',
+    title: '住宅取得等資金に係る贈与税の非課税措置',
+    org: '財務省（令和9年度税制改正要望・国土交通省）',
+    url: 'https://www.mof.go.jp/tax_policy/tax_reform/outline/fy2027/request/mlit/09y_mlit_k_25.pdf',
+    published: '2026-08',
+    checked: CHECKED_TAX,
+    kind: 'law',
+    note: '親・祖父母からの住宅資金の贈与は、質の高い住宅1,000万円・一般住宅500万円まで非課税（2026年12月31日までの贈与。延長を要望中）。110万円の基礎控除と併用。翌年3月15日までに申告が必要。',
+  },
+  {
+    id: 'sale-3000',
+    title: 'マイホームを売ったときの特例（3,000万円の特別控除）',
+    org: '国税庁',
+    url: 'https://www.nta.go.jp/taxes/shiraberu/taxanswer/joto/3302.htm',
+    published: '—',
+    checked: CHECKED_TAX,
+    kind: 'law',
+    note: '居住用の家の売却益から3,000万円を控除。残りに所有期間5年超20.315%（10年超は6,000万円以下の部分14.21%）、5年以下39.63%。建物の取得費は非事業用の減価償却（木造0.031・鉄筋コンクリート0.015）。',
   },
   {
     id: 'property-tax',
     title: '新築住宅の固定資産税の減額・住宅用地の特例',
-    org: '地方税法（HOME\'S不動産投資の解説で照合）',
+    org: '地方税法（HOME\'S不動産投資の解説、令和8年度改正は三井のリハウスの解説で照合）',
     url: 'https://toushi.homes.co.jp/column/tax/tax_system_amendment/law08/',
     published: '—',
-    checked: CHECKED,
+    checked: CHECKED_TAX,
     kind: 'law',
-    note: '固定資産税1.4%・都市計画税0.3%（上限）。小規模住宅用地は固定資産税1/6・都市計画税1/3。新築住宅は120㎡分の固定資産税を3年度（長期優良住宅5年度）1/2。',
+    note: '固定資産税1.4%・都市計画税0.3%（上限）。住宅用地は200㎡まで固定資産税1/6・都市計画税1/3、超える部分は1/3・2/3。新築住宅は120㎡分の固定資産税を戸建て3年度・マンション5年度（長期優良住宅5年度・7年度）1/2（床面積40〜240㎡）。新築の建物は完成の翌年から課税、評価は3年ごとの評価替え（2027年度が基準年度）。',
   },
   {
     id: 'care-2024',
@@ -489,16 +551,37 @@ export const RETIRE_LIVING_COUPLE = 263_979;
 /* ---------- 住宅ローン審査の目安（フラット35） ---------- */
 export const SCREENING = { lowIncome: 4_000_000, ratioLow: 0.3, ratioHigh: 0.35, maxYears: 35, maxAge: 80 } as const;
 
-/* ---------- 住宅ローン控除（令和8年度改正後・2026〜2027年入居の新築） ---------- */
+/* ---------- 住宅ローン控除（令和8年度改正後・2026〜2030年入居） ---------- */
+/**
+ * 借入限度額（normal = 一般、kosodate = 子育て世帯・若者夫婦世帯）と控除期間。
+ * 国土交通省「住宅ローン減税」説明資料（令和8年度改正）。
+ * 新築の省エネ基準適合住宅は2027年末入居まで（2028年以降は2027年末までに建築確認を受けたものだけ 2,000万円×10年）。
+ * その他の住宅（省エネ基準を満たさない）は新築は対象外、中古は2,000万円×10年。
+ */
 export const DEDUCTION = {
   rate: 0.007,
   residentTaxCap: 97_500,
+  /** 住民税から控除できるのは所得税の課税総所得金額等の5%まで */
+  residentTaxRate: 0.05,
   limits: {
     longlife: { normal: 45_000_000, kosodate: 50_000_000, years: 13 },
     zeh: { normal: 35_000_000, kosodate: 45_000_000, years: 13 },
-    standard: { normal: 20_000_000, kosodate: 30_000_000, years: 10 },
+    standard: { normal: 20_000_000, kosodate: 30_000_000, years: 13 },
     other: { normal: 0, kosodate: 0, years: 0 },
   },
+  usedLimits: {
+    longlife: { normal: 35_000_000, kosodate: 45_000_000, years: 13 },
+    zeh: { normal: 35_000_000, kosodate: 45_000_000, years: 13 },
+    standard: { normal: 20_000_000, kosodate: 30_000_000, years: 13 },
+    other: { normal: 20_000_000, kosodate: 20_000_000, years: 10 },
+  },
+  /** 新築の省エネ基準適合住宅を入居できる最後の年（2028年以降は 2,000万円×10年・2027年末までに建築確認のもの） */
+  standardNewLastYear: 2027,
+  standardNewLate: { limit: 20_000_000, years: 10 },
+  lastYear: 2030,
+  /** 子育て世帯・若者夫婦世帯: 夫婦のどちらかが40歳未満、または19歳未満の子がいる（入居した年の12月31日時点） */
+  youngAge: 40,
+  childAge: 19,
 } as const;
 
 /* ---------- 固定資産税・都市計画税の推計 ---------- */
@@ -506,16 +589,111 @@ export const PROPERTY_TAX = {
   fixedRate: 0.014,
   cityRate: 0.003,
   landEvalRatio: 0.7, // 固定資産税評価額 ≒ 公示価格の7割
-  landFixedFactor: 1 / 6, // 小規模住宅用地
+  landFixedFactor: 1 / 6, // 小規模住宅用地（200㎡まで）
   landCityFactor: 1 / 3,
+  landFixedFactorLarge: 1 / 3, // 一般住宅用地（200㎡を超える部分）
+  landCityFactorLarge: 2 / 3,
+  smallLandArea: 200,
   bldgEvalRatio: 0.6, // 新築家屋の評価額 ≒ 請負価格の5〜7割（目安）
   bldgFloor: 0.2, // 経年減点補正率の下限
   woodYears: 25,
   rcYears: 47,
+  /** 評価替えの基準年度（3年ごと。建物の評価はこの年度にだけ下がる） */
+  reevalBaseYear: 2027,
   newBuildCut: 0.5,
   newBuildYears: 3,
   newBuildYearsLonglife: 5,
-  newBuildArea: 120,
+  newBuildYearsMansion: 5, // 3階建て以上の耐火・準耐火建築物
+  newBuildYearsMansionLonglife: 7,
+  newBuildArea: 120, // 減額の対象は120㎡分まで
+  newBuildAreaMin: 40, // 床面積の要件（令和8年度改正で 50→40㎡、280→240㎡）
+  newBuildAreaMax: 240,
+} as const;
+
+/* ---------- 不動産取得税（都道府県税。取得から半年〜1年ほどで納税通知書が届く） ---------- */
+export const ACQUISITION_TAX = {
+  rate: 0.03, // 住宅・土地の特例税率（本則4%、2027年3月31日まで）
+  landHalf: 0.5, // 宅地の課税標準を1/2（2027年3月31日まで）
+  bldgDeduct: 12_000_000, // 新築住宅の控除（床面積50〜240㎡）
+  bldgDeductLonglife: 13_000_000,
+  usedDeduct: 12_000_000, // 中古（1997年4月以降の新築）の控除。古い家はもっと少ない
+  landMinReduce: 45_000,
+  landFloorMax: 200, // 土地の減額: 1㎡あたりの価格 × 床面積の2倍（200㎡まで）× 3%
+  floorMin: 50,
+  floorMax: 240,
+  /** 納付の時期（購入から何か月後） */
+  payAfterMonths: 6,
+} as const;
+
+/* ---------- 登録免許税（登記のときに払う。司法書士が代わりに納める） ---------- */
+export const REGISTRATION_TAX = {
+  preserve: 0.0015, // 新築建物の所有権保存（本則0.4%、2027年3月31日まで）
+  preserveCertified: 0.001, // 長期優良・低炭素住宅
+  transferBldg: 0.003, // 中古建物の所有権移転（本則2%）
+  transferBldgLonglifeDetached: 0.002,
+  transferLand: 0.015, // 土地の売買による所有権移転（本則2%、2029年3月31日まで）
+  mortgage: 0.001, // 抵当権設定（本則0.4%）
+} as const;
+
+/* ---------- 印紙税（軽減措置は2027年3月31日まで） ---------- */
+/** 不動産売買契約書・建設工事請負契約書（軽減後） */
+export const STAMP_CONTRACT: [number, number][] = [
+  [1_000_000, 200], [2_000_000, 200], [3_000_000, 500], [5_000_000, 1_000], [10_000_000, 5_000],
+  [50_000_000, 10_000], [100_000_000, 30_000], [500_000_000, 60_000], [Infinity, 160_000],
+];
+/** 金銭消費貸借契約書（ローンの契約。軽減なし） */
+export const STAMP_LOAN: [number, number][] = [
+  [1_000_000, 1_000], [5_000_000, 2_000], [10_000_000, 10_000], [50_000_000, 20_000], [100_000_000, 60_000],
+  [500_000_000, 100_000], [Infinity, 200_000],
+];
+
+/* ---------- 購入時の手数料（目安） ---------- */
+export const PURCHASE_FEES = {
+  /** 融資手数料（定率型・借入額×2.2%が多い）。保証料型なら保証料（約2%）に置き換える */
+  loanFeeRate: 0.022,
+  /** 司法書士の報酬（保存・移転・抵当権設定） */
+  scrivener: 120_000,
+  /** 建物の表示登記（土地家屋調査士。新築戸建て） */
+  surveyor: 100_000,
+  /** 仲介手数料 = (価格×3% + 6万円) × 消費税 */
+  brokerRate: 0.03,
+  brokerFixed: 60_000,
+  consumptionTax: 0.1,
+  /** 建物の評価額がわからないときに仮置きする床面積（㎡） */
+  floorDetached: 100,
+  floorMansion: 70,
+  landDetached: 150,
+} as const;
+
+/* ---------- 贈与税（親などからの住宅資金の援助） ---------- */
+export const GIFT_TAX = {
+  basic: 1_100_000,
+  /** 住宅取得等資金の贈与の非課税（省エネ等住宅 1,000万円・一般 500万円）。2026年12月31日までの贈与 */
+  exemptHigh: 10_000_000,
+  exemptGeneral: 5_000_000,
+  exemptLastYear: 2026,
+  /** 相続時精算課税の特別控除（累計） */
+  settlement: 25_000_000,
+  settlementRate: 0.2,
+  /** 直系尊属から18歳以上への贈与（特例税率）: [上限, 税率, 控除額] */
+  table: [
+    [2_000_000, 0.1, 0], [4_000_000, 0.15, 100_000], [6_000_000, 0.2, 300_000], [10_000_000, 0.3, 900_000],
+    [15_000_000, 0.4, 1_900_000], [30_000_000, 0.45, 2_650_000], [45_000_000, 0.5, 4_150_000], [Infinity, 0.55, 6_400_000],
+  ] as [number, number, number][],
+} as const;
+
+/* ---------- 家を売るときの税（譲渡所得） ---------- */
+export const SALE_TAX = {
+  /** 居住用財産の3,000万円特別控除 */
+  special: 30_000_000,
+  /** 所有期間（売った年の1月1日時点）5年超 / 5年以下 / 10年超で6,000万円以下の部分 */
+  longRate: 0.20315,
+  shortRate: 0.3963,
+  longLowRate: 0.1421,
+  longLowLimit: 60_000_000,
+  /** 非事業用の建物の減価償却（耐用年数×1.5の旧定額法）: 木造33年 0.031、鉄筋コンクリート70年 0.015 */
+  depWood: 0.031,
+  depRC: 0.015,
 } as const;
 
 /**

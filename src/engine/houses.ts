@@ -108,7 +108,8 @@ export function evaluateHouses(ctx: Context, houses: House[], weights: Weights, 
     return {
       id: h.id,
       name: h.name || '名称未設定',
-      model,
+      // 借入額で変わる諸費用を含めた住宅（想定どおりの条件で試した借入額のもの）
+      model: base.house,
       total: base.total,
       loan: base.loan,
       down: base.down,

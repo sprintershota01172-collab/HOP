@@ -1,10 +1,10 @@
 import { annuityPayment, principalFromPayment } from './loan';
-import { ASSUME, CARE_RESERVE, SCREENING } from './reference';
+import { ASSUME, CARE_RESERVE, PURCHASE_FEES, SCREENING } from './reference';
 import type { Resolved } from './resolve';
 import { incomeOf, simulate, spendOf, type HouseModel, type MonthRow, type Purchase, type Scenario, type SimResult } from './simulate';
-import { estimatePropertyTax } from './tax';
+import { estimatePropertyTax, fixedCosts, loanCosts } from './tax';
 import { cityPlanRateOf } from './simulate';
-import type { Assumptions, House, LoanTerms, Yen, YM } from './types';
+import type { Assumptions, House, HousingPlan, LoanTerms, Yen, YM } from './types';
 import { yenText } from './text';
 import { ageAt, ymYear } from './ym';
 
@@ -154,21 +154,42 @@ export function bankLimit(r: Resolved): BankLimit {
   return { amount, pair: borrowers.length > 1, gross, ratio, years, rate, debtAnnual };
 }
 
-/** 予算（住宅取得総額）から仮の住宅を作る */
-export function budgetHouse(r: Resolved, total: Yen): HouseModel {
+/** 諸費用を内訳で計算するか（以前の版のデータは諸費用率） */
+export const miscDetail = (h: HousingPlan): boolean => (h.miscMode ?? 'rate') === 'detail';
+export const loanFeeRateOf = (h: HousingPlan): number => h.loanFeeRate ?? PURCHASE_FEES.loanFeeRate;
+
+/**
+ * 予算（住宅取得総額）から仮の住宅を作る。
+ * 内訳で計算する場合は、物件価格 ＋ 購入時の諸費用（借入額で変わる分を含む）＝ 取得総額 になる物件価格を探す。
+ * 不動産取得税は購入の半年後に払うため取得総額には入れず、その月の支出にする
+ */
+export function budgetHouse(r: Resolved, total: Yen, loan: Yen = 0): HouseModel {
   const h = r.plan.housing;
-  const price = Math.round(total / (1 + h.miscRate));
-  const land = Math.round(price * h.landShare);
+  const shape = (price: number) => {
+    const land = Math.round(price * h.landShare);
+    return { kind: h.kind, newBuild: true, price, landPrice: land, buildingPrice: price - land, floorArea: null, landArea: null, energy: h.deduction.energy };
+  };
+  let price: number;
+  let acqTax = 0;
+  if (miscDetail(h)) {
+    const extra = h.extraCost ?? 0;
+    const lc = loanCosts(loan, loanFeeRateOf(h));
+    let lo = 0, hi = Math.max(0, total);
+    for (let i = 0; i < 40 && hi - lo > 1; i++) {
+      const mid = (lo + hi) / 2;
+      if (mid + fixedCosts(shape(mid), extra).now + lc > total) hi = mid;
+      else lo = mid;
+    }
+    price = Math.floor(lo);
+    acqTax = fixedCosts(shape(price), extra).later;
+  } else price = Math.round(total / (1 + h.miscRate));
+  const s = shape(price);
   return {
     label: '予算モデル',
-    price,
+    ...s,
     misc: total - price,
-    kind: h.kind,
-    newBuild: true,
-    landPrice: land,
-    buildingPrice: price - land,
-    floorArea: null,
-    energy: h.deduction.energy,
+    acqTax,
+    loanCost: false,
     propertyTaxAnnual: null,
     insuranceAnnual: h.insuranceAnnual ?? (h.kind === 'mansion' ? ASSUME.insuranceMansion : ASSUME.insuranceDetached),
     maintenanceMonthly: h.maintenanceMonthly ?? (h.kind === 'mansion' ? ASSUME.maintenanceMansion : ASSUME.maintenanceDetached),
@@ -176,7 +197,7 @@ export function budgetHouse(r: Resolved, total: Yen): HouseModel {
   };
 }
 
-/** 登録した住宅から計算用の住宅を作る */
+/** 登録した住宅から計算用の住宅を作る（借入額で変わる諸費用は tryHouse で加える） */
 export function houseModel(r: Resolved, x: House): HouseModel {
   const h = r.plan.housing;
   const price = x.price ?? (x.landPrice ?? 0) + (x.buildingPrice ?? 0);
@@ -187,16 +208,17 @@ export function houseModel(r: Resolved, x: House): HouseModel {
     x.kind === 'mansion'
       ? x.costs.mgmtMonthly + x.costs.repairFundMonthly || (h.maintenanceMonthly ?? ASSUME.maintenanceMansion)
       : x.costs.repairMonthly ?? h.maintenanceMonthly ?? ASSUME.maintenanceDetached;
+  const energy = x.perf.energy ?? h.deduction.energy;
+  const shape = { kind: x.kind, newBuild: x.newBuild, price, landPrice: land, buildingPrice: building, floorArea: x.floorArea, landArea: x.landArea, energy };
+  // 諸費用を入力した場合はそれがすべて（不動産取得税・融資手数料も含む）とみなす
+  const detail = x.misc == null && miscDetail(h);
+  const fc = detail ? fixedCosts(shape, h.extraCost ?? 0) : null;
   return {
     label: x.name,
-    price,
-    misc: x.misc ?? Math.round(price * h.miscRate),
-    kind: x.kind,
-    newBuild: x.newBuild,
-    landPrice: land,
-    buildingPrice: building,
-    floorArea: x.floorArea,
-    energy: x.perf.energy ?? h.deduction.energy,
+    ...shape,
+    misc: x.misc ?? (fc ? fc.now : Math.round(price * h.miscRate)),
+    acqTax: fc ? fc.later : 0,
+    loanCost: detail,
     propertyTaxAnnual: x.costs.propertyTaxAnnual,
     insuranceAnnual: x.costs.insuranceAnnual ?? h.insuranceAnnual ?? (x.kind === 'mansion' ? ASSUME.insuranceMansion : ASSUME.insuranceDetached),
     maintenanceMonthly: maint,
@@ -287,29 +309,42 @@ export function evaluate(ctx: Context, purchase: Purchase, tier: TierKey, scenar
 export function tryLoan(ctx: Context, loan: Yen, tier: TierKey, scenario?: Scenario): Trial {
   const { r } = ctx;
   // 自己資金は借入額に応じた住宅費で決まる（1回の見積で十分に収束する）
-  const guess = budgetHouse(r, loan + Math.max(0, ctx.cashBefore));
+  const guess = budgetHouse(r, loan + Math.max(0, ctx.cashBefore), loan);
   const info = downFor(ctx, tier, housingMonthly(ctx, guess, loan), Infinity);
   const total = loan + info.down;
-  const house = budgetHouse(r, total);
+  const house = budgetHouse(r, total, loan);
   const purchase: Purchase = { house, loan, down: info.down, ym: r.purchaseYM, terms: ctx.terms };
   const ev = evaluate(ctx, purchase, tier, scenario);
   return { loan, down: info.down, total, house, purchase, sim: ev.sim, fail: ev.fail };
 }
 
-/** 決まった住宅（取得総額が固定）を、段階ごとの自己資金で試す */
+/**
+ * 決まった住宅を、段階ごとの自己資金で試す。
+ * 諸費用を内訳で計算する住宅は、借入額で変わる諸費用（融資手数料など）も借入額に合わせて加える
+ */
 export function tryHouse(ctx: Context, house: HouseModel, tier: TierKey, scenario?: Scenario): Trial {
   const { r } = ctx;
-  const total = house.price + house.misc;
-  let loan = Math.max(0, total - Math.max(0, ctx.cashBefore));
-  let info = downFor(ctx, tier, housingMonthly(ctx, house, loan), total);
+  const base = house.price + house.misc;
+  const fee = loanFeeRateOf(r.plan.housing);
+  const lc = (loan: number) => (house.loanCost ? loanCosts(loan, fee) : 0);
+  // 自己資金 down のときの借入額（借入額で変わる諸費用も借りる）
+  const loanFor = (down: number) => {
+    let loan = Math.max(0, base - down);
+    for (let i = 0; i < 4 && loan > 0; i++) loan = Math.max(0, base + lc(loan) - down);
+    return loan;
+  };
+  let loan = loanFor(Math.max(0, ctx.cashBefore));
+  let info = downFor(ctx, tier, housingMonthly(ctx, house, loan), base);
   for (let i = 0; i < 3; i++) {
-    loan = total - info.down;
-    info = downFor(ctx, tier, housingMonthly(ctx, house, loan), total);
+    loan = loanFor(info.down);
+    info = downFor(ctx, tier, housingMonthly(ctx, house, loan), base);
   }
-  loan = Math.max(0, total - info.down);
-  const purchase: Purchase = { house, loan, down: info.down, ym: r.purchaseYM, terms: ctx.terms };
+  loan = loanFor(info.down);
+  const final: HouseModel = house.loanCost ? { ...house, misc: house.misc + lc(loan), loanCost: false } : house;
+  const total = final.price + final.misc;
+  const purchase: Purchase = { house: final, loan, down: total - loan, ym: r.purchaseYM, terms: ctx.terms };
   const ev = evaluate(ctx, purchase, tier, scenario);
-  return { loan, down: info.down, total, house, purchase, sim: ev.sim, fail: ev.fail };
+  return { loan, down: total - loan, total, house: final, purchase, sim: ev.sim, fail: ev.fail };
 }
 
 export interface TierResult {

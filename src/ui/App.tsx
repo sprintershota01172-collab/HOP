@@ -12,7 +12,7 @@ import { Memo } from './screens/Memo';
 import { HouseDetailSheet, HouseEditSheet, WeightsSheet } from './sheets/house';
 import { BasisSheet, ConfirmSheet, FpBasisSheet, LoanTermsSheet, MemoEditSheet, JoinRoomSheet, MissingSheet, PrepayEditSheet, SaleSheet, SettingsSheet, WizardSheet } from './sheets/misc';
 import {
-  AssumptionsSheet, ChildEditSheet, ChildrenSheet, DebtEditSheet, EventEditSheet, EventsSheet, GoalEditSheet, GoalsSheet, HousingSheet, IncomeChangeSheet, IncomeSheet,
+  AssumptionsSheet, ChildEditSheet, ChildrenSheet, DebtEditSheet, EventEditSheet, EventsSheet, GoalEditSheet, GoalsSheet, HousingSheet, HouseTaxSheet, IncomeChangeSheet, IncomeSheet,
   InsEditSheet, InsuranceSheet, InvEditSheet, InvestSheet, LivingAddSheet, LivingItemsSheet, LivingEditSheet, LivingSheet, SavingsSheet, WorkEditSheet, WorkSheet,
   type SheetProps,
 } from './sheets/plan';
@@ -22,7 +22,7 @@ const SHEETS: Record<string, (p: SheetProps) => ReactElement | null> = {
   income: IncomeSheet, incomeChange: IncomeChangeSheet, savings: SavingsSheet, debtEdit: DebtEditSheet, children: ChildrenSheet, childEdit: ChildEditSheet,
   living: LivingSheet, livingItems: LivingItemsSheet, livingAdd: LivingAddSheet, livingEdit: LivingEditSheet, insurance: InsuranceSheet, insEdit: InsEditSheet,
   invest: InvestSheet, invEdit: InvEditSheet, goals: GoalsSheet, goalEdit: GoalEditSheet, events: EventsSheet, eventEdit: EventEditSheet,
-  work: WorkSheet, workEdit: WorkEditSheet, housing: HousingSheet, assumptions: AssumptionsSheet,
+  work: WorkSheet, workEdit: WorkEditSheet, housing: HousingSheet, houseTax: HouseTaxSheet, assumptions: AssumptionsSheet,
   basis: BasisSheet, fpBasis: FpBasisSheet, loanTerms: LoanTermsSheet, prepayEdit: PrepayEditSheet, missing: MissingSheet, sale: SaleSheet, memoEdit: MemoEditSheet, settings: SettingsSheet, joinRoom: JoinRoomSheet,
   confirm: ConfirmSheet, wizard: WizardSheet, houseEdit: HouseEditSheet, houseDetail: HouseDetailSheet, weights: WeightsSheet,
 };

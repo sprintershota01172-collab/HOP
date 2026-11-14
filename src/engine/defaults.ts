@@ -1,5 +1,5 @@
 import { DEFAULT_WEIGHTS } from './houses';
-import { ASSUME } from './reference';
+import { ASSUME, PURCHASE_FEES } from './reference';
 import type { AppData, Assumptions, Child, House, HousingPlan, LivingItem, Person, Plan } from './types';
 import { toYM, ymYear } from './ym';
 
@@ -53,6 +53,10 @@ export const defaultHousing = (): HousingPlan => ({
   gift: 0,
   movingCost: null,
   miscRate: ASSUME.miscRate,
+  miscMode: 'detail',
+  loanFeeRate: PURCHASE_FEES.loanFeeRate,
+  extraCost: 0,
+  giftMode: 'exempt',
   kind: 'detached',
   landShare: ASSUME.landShareDetached,
   maintenanceMonthly: null,
@@ -72,7 +76,7 @@ export const defaultHousing = (): HousingPlan => ({
   desiredLoan: null,
   fpBasis: 'recommended',
   houseId: null,
-  deduction: { enabled: false, energy: 'zeh', family: 'kosodate', taxCapAnnual: null },
+  deduction: { enabled: false, energy: 'zeh', family: 'auto', taxCapAnnual: null },
   newBuildTaxCut: false,
 });
 

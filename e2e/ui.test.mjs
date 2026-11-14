@@ -114,6 +114,32 @@ describe('スクロールなしのレイアウト', () => {
   });
 });
 
+describe('購入時の諸費用と税', () => {
+  it('375×667: 住まいの「維持費」「税の優遇」と、諸費用と税の内訳の4ページがスクロールなしで収まる', async () => {
+    const { ctx, page } = await open([375, 667]);
+    await settle(page);
+    await page.click('nav button:nth-child(2)');
+    await page.click('text=ライフプランを入力');
+    await page.click('.tile:has-text("住まい")');
+    await page.waitForTimeout(380);
+    const sh = () => page.locator('.sheet:not(.closing)').last();
+    for (const pg of ['維持費', '税の優遇']) {
+      await sh().locator(`.seg button:has-text("${pg}")`).first().click();
+      await page.waitForTimeout(420);
+      assert.ok((await sheetOverflow(page)) <= 1, pg);
+    }
+    await sh().locator('button:has-text("購入時の諸費用と税の内訳")').click();
+    await page.waitForTimeout(420);
+    assert.ok((await sh().locator('td:has-text("登録免許税")').count()) >= 1, '内訳に登録免許税');
+    for (const pg of ['諸費用', 'ローン控除', '固定資産税', '手続き']) {
+      await sh().locator(`.seg button:has-text("${pg}")`).first().click();
+      await page.waitForTimeout(420);
+      assert.ok((await sheetOverflow(page)) <= 1, pg);
+    }
+    await ctx.close();
+  });
+});
+
 describe('入力・保存・再計算', () => {
   it('収入を変えると推奨予算が変わり、再読み込み後も保持される。表示年を変えても推奨予算は変わらない', async () => {
     const { ctx, page } = await open([390, 844]);

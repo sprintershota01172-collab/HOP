@@ -246,8 +246,19 @@ export interface HousingPlan {
   /** 親などからの援助（購入月に入金） */
   gift: Yen;
   movingCost: Yen | null;
-  /** 諸費用率（物価に対する割合） */
+  /** 諸費用率（物価に対する割合）。miscMode が 'rate' のときに使う */
   miscRate: Rate;
+  /**
+   * 諸費用の計算方法。detail = 内訳（印紙税・登録免許税・不動産取得税・司法書士・融資手数料など）を積み上げる、
+   * rate = 物件価格 × 諸費用率。未設定は rate（以前の版のデータ）
+   */
+  miscMode?: 'detail' | 'rate';
+  /** 融資手数料・保証料（借入額に対する割合）。detail のときに使う */
+  loanFeeRate?: Rate;
+  /** 外構・地盤改良など、物件価格に入っていない工事（detail のときに諸費用へ加える） */
+  extraCost?: Yen;
+  /** 親などからの援助の贈与税の扱い（未設定は exempt） */
+  giftMode?: 'exempt' | 'settlement' | 'calendar';
   kind: 'detached' | 'mansion';
   landShare: Rate;
   /** 戸建て: 修繕積立相当 / マンション: 管理費＋修繕積立金（月） */
@@ -262,7 +273,8 @@ export interface HousingPlan {
   deduction: {
     enabled: boolean;
     energy: EnergyClass;
-    family: 'kosodate' | 'normal';
+    /** auto = 入居した年の年齢・子供から判定（夫婦のどちらかが40歳未満、または19歳未満の子） */
+    family: 'auto' | 'kosodate' | 'normal';
     /** 控除しきれる税額（所得税＋住民税分・年）。null = 推計 */
     taxCapAnnual: Yen | null;
   };

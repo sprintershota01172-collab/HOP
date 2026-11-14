@@ -1,9 +1,9 @@
 import { buildSchedule, ratePath, type LoanSchedule } from './loan';
-import { ASSUME, CHILD_ALLOWANCE, CHILD_LIVING, EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, JUKU_FROM_GRADE, LEAVE, LUNCH_RELIEF_FROM, eduOutside } from './reference';
+import { ACQUISITION_TAX, ASSUME, CHILD_ALLOWANCE, DEDUCTION, CHILD_LIVING, EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, JUKU_FROM_GRADE, LEAVE, LUNCH_RELIEF_FROM, eduOutside } from './reference';
 import { FUKUSHOKU_EXEMPT_BELOW, NATIONAL, nurseryFee, REGIONS, residentIncomeTax, type RegionInfo } from './region';
 import { annuityPayment } from './loan';
 import type { Resolved, RPerson } from './resolve';
-import { deductionLimit, estimateDeductibleTax, estimatePropertyTax, marginalTaxRate } from './tax';
+import { deductibleTaxParts, deductionLimit, evalAgeAt, giftTax, marginalTaxRate, propertyTaxParts, saleGainTax } from './tax';
 import type { Child, EnergyClass, Investment, LoanTerms, Rate, Yen, YM } from './types';
 import { ageAt, elemStartFY, firstMarchAfterAge, gradeAt, toYM, ymMonth, ymYear } from './ym';
 
@@ -17,7 +17,12 @@ export interface HouseModel {
   landPrice: Yen;
   buildingPrice: Yen;
   floorArea: number | null;
+  landArea: number | null;
   energy: EnergyClass;
+  /** 不動産取得税（購入の半年後に払う。諸費用を割合や手入力で決めた場合は0＝諸費用に含む） */
+  acqTax: Yen;
+  /** 借入額で変わる諸費用（融資手数料など）をまだ misc に含めていない */
+  loanCost: boolean;
   /** 固定資産税の手入力（年）。null = 推計 */
   propertyTaxAnnual: Yen | null;
   insuranceAnnual: Yen;
@@ -774,6 +779,128 @@ function prepare(r: Resolved, inflationDelta: number, rec?: Parts): Pre {
 }
 
 /**
+ * その年の固定資産税・都市計画税（年額）。
+ * 1月1日の所有者にかかる。土地は購入の翌月から（売主との清算を含む）、新築の建物は完成の翌年から課税され、
+ * 減額の期間もそこから数える。建物の評価は3年ごとの評価替えで下がる
+ */
+export function propertyTaxForYear(r: Resolved, hm: HouseModel, purchaseYM: YM, y: number): { land: Yen; building: Yen; total: Yen; cut: boolean } {
+  if (hm.propertyTaxAnnual != null) return { land: 0, building: 0, total: hm.propertyTaxAnnual, cut: false };
+  const py = ymYear(purchaseYM);
+  const first = hm.newBuild ? py + 1 : py;
+  const cutEnabled = r.plan.housing.newBuildTaxCut;
+  const input = { kind: hm.kind, newBuild: hm.newBuild, landPrice: hm.landPrice, buildingPrice: hm.buildingPrice, floorArea: hm.floorArea, landArea: hm.landArea, energy: hm.energy, cutEnabled };
+  const parts = propertyTaxParts(input, y - first, cityPlanRateOf(r.plan.assumptions.region), evalAgeAt(y, first));
+  const building = y >= first ? parts.building : 0;
+  const cut = cutEnabled && hm.newBuild && y >= first && propertyTaxParts({ ...input, cutEnabled: false }, y - first, cityPlanRateOf(r.plan.assumptions.region), evalAgeAt(y, first)).building > parts.building;
+  return { land: parts.land, building, total: parts.land + building, cut };
+}
+
+/** 住宅ローン控除の1年分（人ごと） */
+export interface DeductionYear {
+  year: number;
+  /** 年末残高（取得対価まで） */
+  balance: Yen;
+  /** 控除の上限（残高×0.7%） */
+  max: Yen;
+  /** 実際に引ける額（税額の範囲内） */
+  credit: Yen;
+  /** うち所得税（年末調整・初年度は確定申告で戻る） */
+  incomeTax: Yen;
+  /** うち住民税（翌年6月〜翌々年5月の住民税が減る） */
+  resident: Yen;
+  /** 控除しきれなかった額 */
+  unused: Yen;
+}
+
+export interface DeductionPlan {
+  family: 'kosodate' | 'normal';
+  limit: Yen;
+  years: number;
+  /** 受け取る月 → 金額 */
+  incomeTax: Map<YM, Yen>;
+  resident: Map<YM, Yen>;
+  list: DeductionYear[];
+  note: string | null;
+}
+
+/** 子育て世帯・若者夫婦世帯か（入居した年の12月31日時点） */
+export function isKosodate(r: Resolved, year: number): boolean {
+  const dec = toYM(year, 12);
+  const young = r.people.length > 1 && r.people.some((p) => ageAt(p.birthYM, dec) < DEDUCTION.youngAge);
+  const kid = r.plan.children.some((c) => c.birthYM <= dec && ageAt(c.birthYM, dec) < DEDUCTION.childAge);
+  return young || kid;
+}
+
+/** その人のその年の額面年収の概算（勤労収入の手取りの割合で、いまの額面年収を伸び縮みさせる。育休の給付は非課税なので除く） */
+export function grossInYear(r: Resolved, p: RPerson, year: number): Yen {
+  const full = p.net * 12 + p.bonus;
+  if (full <= 0 || p.gross <= 0) return 0;
+  const ws = wageSeries(r, p);
+  let net = 0;
+  for (let m = Math.max(r.start, toYM(year, 1)); m <= Math.min(r.end, toYM(year, 12)); m++) {
+    const w = ws[m - r.start];
+    net += w.salary + w.bonus;
+  }
+  return Math.round((p.gross * net) / full);
+}
+
+/**
+ * 住宅ローン控除の計画（年末残高 × 0.7%、人ごとの税額の範囲内）。
+ * ローンを組む人が夫婦のときは、額面年収の割合で借入を分ける（ペアローン・連帯債務）。
+ * 所得税の分は年末調整で12月（初年度は確定申告で翌年3月）に戻り、引ききれない分は翌年6月から1年間の住民税が減る
+ */
+export function deductionPlan(r: Resolved, purchase: Purchase, schedule: LoanSchedule): DeductionPlan | null {
+  const plan = r.plan;
+  const d = plan.housing.deduction;
+  if (!d.enabled) return null;
+  const hm = purchase.house;
+  const py = ymYear(purchase.ym);
+  const floor = hm.floorArea;
+  let family: 'kosodate' | 'normal' = d.family === 'auto' ? (isKosodate(r, py) ? 'kosodate' : 'normal') : d.family;
+  let note: string | null = null;
+  if (floor != null && floor < 40) return { family, limit: 0, years: 0, incomeTax: new Map(), resident: new Map(), list: [], note: '床面積40㎡未満は対象外' };
+  if (family === 'kosodate' && floor != null && floor < 50) {
+    family = 'normal';
+    note = '床面積50㎡未満は子育て世帯の上乗せなし';
+  }
+  const { limit, years } = deductionLimit(hm.energy, family, hm.newBuild, py);
+  if (limit <= 0 || years <= 0) return { family, limit, years, incomeTax: new Map(), resident: new Map(), list: [], note: note ?? 'この住宅・入居年は対象外' };
+  const borrowers = plan.housing.loan.borrower === 'pair' ? r.people : r.people.filter((p) => p.id === 'self');
+  const grossSum = borrowers.reduce((t, p) => t + p.gross, 0);
+  const shares = borrowers.map((p) => (borrowers.length === 1 ? 1 : grossSum > 0 ? p.gross / grossSum : 1 / borrowers.length));
+  const incomeTax = new Map<YM, Yen>();
+  const resident = new Map<YM, Yen>();
+  const add = (map: Map<YM, Yen>, ym: YM, v: number) => v > 0 && map.set(ym, (map.get(ym) ?? 0) + v);
+  const list: DeductionYear[] = [];
+  for (let i = 0; i < years; i++) {
+    const year = py + i;
+    const k = toYM(year, 12) - purchase.ym; // 12月時点の返済回数
+    const raw = k <= 0 ? purchase.loan : k > schedule.months ? 0 : schedule.balance[k - 1];
+    const bal = Math.min(raw, hm.price);
+    if (bal <= 0) break;
+    const row: DeductionYear = { year, balance: bal, max: 0, credit: 0, incomeTax: 0, resident: 0, unused: 0 };
+    borrowers.forEach((p, j) => {
+      const max = Math.floor(Math.min(bal * shares[j], limit) * DEDUCTION.rate);
+      const parts = d.taxCapAnnual != null ? { incomeTax: Math.round(d.taxCapAnnual * shares[j]), residentCap: 0 } : deductibleTaxParts(grossInYear(r, p, year), year);
+      const credit = Math.min(max, parts.incomeTax + parts.residentCap);
+      const it = Math.min(credit, parts.incomeTax);
+      const res = credit - it;
+      row.max += max;
+      row.credit += credit;
+      row.incomeTax += it;
+      row.resident += res;
+    });
+    row.unused = row.max - row.credit;
+    list.push(row);
+    add(incomeTax, i === 0 ? toYM(year + 1, 3) : toYM(year, 12), row.incomeTax);
+    // 住民税は翌年6月〜翌々年5月の12回で減る（端数は6月）
+    const per = Math.floor(row.resident / 12);
+    for (let q = 0; q < 12; q++) add(resident, toYM(year + 1, 6) + q, q === 0 ? row.resident - per * 11 : per);
+  }
+  return { family, limit, years, incomeTax, resident, list, note };
+}
+
+/**
  * 月次シミュレーション。
  * すべての金額は各月の項目ごとに円単位へ丸めてから足し合わせるため、
  * 月次 → 年次の集計と残高の増減は円単位で一致する。
@@ -810,7 +937,6 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
   // --- ローン ---
   let schedule: LoanSchedule | null = null;
   const pYM = purchase ? purchase.ym : Infinity;
-  const deductionByMarch = new Map<YM, number>();
   if (purchase && purchase.loan > 0) {
     const t = purchase.terms;
     schedule = buildSchedule({
@@ -827,34 +953,16 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
       rule125: t.rule125 && t.rateType !== 'fixed',
       prepay: (t.prepayments ?? []).map((x) => ({ k: x.ym - purchase.ym, amount: x.amount, mode: x.mode })),
     });
-    // 住宅ローン控除（年末残高 × 0.7%、税額の範囲内）を翌年3月に受け取る
-    const d = plan.housing.deduction;
-    if (d.enabled) {
-      const { limit, years } = deductionLimit(purchase.house.energy, d.family);
-      if (limit > 0 && years > 0) {
-        let cap = d.taxCapAnnual;
-        if (cap == null) {
-          const borrowers = plan.housing.loan.borrower === 'pair' ? r.people : r.people.filter((p) => p.id === 'self');
-          cap = borrowers.reduce((s, p) => s + estimateDeductibleTax(p.gross), 0);
-        }
-        const py = ymYear(purchase.ym);
-        for (let i = 0; i < years; i++) {
-          const dec = toYM(py + i, 12);
-          const k = dec - purchase.ym; // 12月時点の返済回数
-          const bal = k <= 0 ? purchase.loan : k > schedule.months ? 0 : schedule.balance[k - 1];
-          const credit = Math.floor(Math.min(Math.min(bal, limit) * 0.007, cap));
-          if (credit > 0) deductionByMarch.set(toYM(py + i + 1, 3), credit);
-        }
-      }
-    }
   }
 
   const pre = prepare(r, sc.inflationDelta, rec);
+  const ded = schedule && purchase ? deductionPlan(r, purchase, schedule) : null;
   const nisaYear = new Map<string, { y: number; ts: number; gr: number }>();
   const idecoYear = new Map<string, number>();
   const hp = plan.housing;
   const reserveMonths = a.reserveMonths;
-  const taxByYear: number[] = [];
+  const taxByYear: Record<number, number> = {};
+  let saleTaxDue: { ym: YM; tax: Yen } | null = null;
 
   for (let m = r.start; m <= r.end; m++) {
     const i = m - r.start;
@@ -913,15 +1021,10 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
         }
       }
       if (m > purchase.ym && !sold) {
-        const yi = Math.floor((m - purchase.ym - 1) / 12);
-        if (taxByYear[yi] === undefined) {
-          taxByYear[yi] = hm.propertyTaxAnnual ?? estimatePropertyTax(
-            { kind: hm.kind, newBuild: hm.newBuild, landPrice: hm.landPrice, buildingPrice: hm.buildingPrice, floorArea: hm.floorArea, energy: hm.energy, cutEnabled: hp.newBuildTaxCut },
-            yi,
-            cityPlanRateOf(plan.assumptions.region),
-          );
-        }
-        const tax = taxByYear[yi];
+        // 固定資産税は1月1日の所有者にかかる。土地は購入の翌月から（売主との清算を含む）、
+        // 新築の建物は完成の翌年から課税され、減額の期間もそこから数える。評価は3年ごとの評価替えで下がる
+        if (taxByYear[y] === undefined) taxByYear[y] = propertyTaxForYear(r, hm, purchase.ym, y).total;
+        const tax = taxByYear[y];
         upkeep = tax / 12 + hm.insuranceAnnual / 12 + hm.maintenanceMonthly * f + hm.parkingMonthly;
         if (rec) {
           const cost = { sheet: 'housing', props: { page: 'cost' } };
@@ -929,6 +1032,18 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
           rec.add(i, 'housing', 'fire', '火災・地震保険', hm.insuranceAnnual / 12, cost);
           rec.add(i, 'housing', 'maint', hm.kind === 'mansion' ? '管理費・修繕積立金' : '修繕費の積立', hm.maintenanceMonthly * f, cost);
           rec.add(i, 'housing', 'parking', '駐車場', hm.parkingMonthly, cost);
+        }
+      }
+      // 購入後に届く税: 不動産取得税（半年後）、援助の贈与税（翌年3月の申告）
+      if (m === purchase.ym + ACQUISITION_TAX.payAfterMonths && hm.acqTax > 0 && !sold) {
+        row.housingOnce += hm.acqTax;
+        rec?.add(i, 'housing', 'acqTax', '不動産取得税', hm.acqTax, { sheet: 'housing', props: { page: 'cost' }, once: true });
+      }
+      if (m === toYM(ymYear(purchase.ym) + 1, 3) && hp.gift > 0) {
+        const g = giftTax(hp.gift, hp.giftMode ?? 'exempt', hm.energy, ymYear(purchase.ym)).tax;
+        if (g > 0) {
+          row.housingOnce += g;
+          rec?.add(i, 'housing', 'giftTax', '贈与税（親などからの援助）', g, { sheet: 'housing', props: { page: 'tax' }, once: true });
         }
       }
       if (schedule && !sold) {
@@ -951,19 +1066,32 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
           row.loanBalance = k === 0 ? purchase.loan : 0;
         }
       }
-      row.deduction = sold ? 0 : deductionByMarch.get(m) ?? 0;
+      const dIt = sold || !ded ? 0 : ded.incomeTax.get(m) ?? 0;
+      const dRes = sold || !ded ? 0 : ded.resident.get(m) ?? 0;
+      row.deduction = dIt + dRes;
       if (sale && m === sale.ym) {
         const price = sale.price ?? homeValueAt(hm, (m - purchase.ym) / 12);
         const net = Math.round(price * (1 - SALE_COST_RATE));
         row.otherIncome += net;
         rec?.add(i, 'income', 'sale', '家の売却（売却費用を引いた額）', net, { sheet: 'sale', once: true });
+        // 譲渡所得の税（3,000万円の特別控除の後）は翌年3月の確定申告で払う
+        const st = saleGainTax({
+          price, cost: price - net, landPrice: hm.landPrice, buildingPrice: hm.buildingPrice, misc: hm.misc, kind: hm.kind,
+          heldYears: Math.floor((toYM(y, 1) - purchase.ym) / 12), usedYears: (m - purchase.ym) / 12,
+        }).tax;
+        if (st > 0) saleTaxDue = { ym: toYM(y + 1, 3), tax: st };
         if (row.loanBalance > 0) {
           row.housingOnce += row.loanBalance;
           rec?.add(i, 'housing', 'payoff', '住宅ローンの一括返済', row.loanBalance, { sheet: 'sale', once: true });
           row.loanBalance = 0;
         }
       }
-      rec?.add(i, 'income', 'deduction', '住宅ローン控除', row.deduction, { sheet: 'housing', props: { page: 'tax' } });
+      rec?.add(i, 'income', 'deduction', '住宅ローン控除（所得税の還付）', dIt, { sheet: 'housing', props: { page: 'tax' } });
+      rec?.add(i, 'income', 'deductionRes', '住宅ローン控除（住民税が減る分）', dRes, { sheet: 'housing', props: { page: 'tax' } });
+      if (saleTaxDue && m === saleTaxDue.ym) {
+        row.housingOnce += saleTaxDue.tax;
+        rec?.add(i, 'housing', 'saleTax', '家の売却の税（譲渡所得）', saleTaxDue.tax, { sheet: 'sale', once: true });
+      }
     }
     row.upkeep = Math.round(upkeep);
     row.housing = row.rent + row.upkeep + row.loanPayment;

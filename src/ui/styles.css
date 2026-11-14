@@ -748,3 +748,5 @@ button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600
 .iconbtn.sm { width: 28px; height: 26px; flex: none; }
 .iconbtn.sm svg { width: 16px; height: 16px; }
 .wf .ln .nm .cnt { font-style: normal; font-weight: 400; font-size: var(--fs-xs); color: var(--ink-3); margin-left: 6px; }
+.table.compact td { padding: 3px 2px; }
+.table.compact th { padding: 2px; }

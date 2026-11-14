@@ -346,7 +346,7 @@ describe('推奨額', () => {
     assert.ok(m.monthlyHousing > 0 && m.loanMonthly > 0 && m.savingsNow > 0);
   });
 
-  it('住宅ローン控除は初期設定では計算に含めず、有効にすると翌年3月に入る', () => {
+  it('住宅ローン控除は初期設定では計算に含めず、有効にすると初年度は翌年3月、その後は12月の年末調整と住民税で入る', () => {
     const r = resolvePlan(d.plan);
     const ctx = makeContext(r);
     const off = tryLoan(ctx, 30_000_000, 'standard', ctx.sc.base).sim.rows.reduce((s, x) => s + x.deduction, 0);
@@ -360,6 +360,11 @@ describe('推奨額', () => {
     const rows = tryLoan(ctx2, 30_000_000, 'standard', ctx2.sc.base).sim.rows;
     const march = rows.find((x) => x.ym === toYM(2028, 3))!;
     assert.ok(march.deduction > 0 && march.deduction <= 30_000_000 * 0.007);
-    assert.equal(rows.filter((x) => x.deduction > 0).length, 13);
+    // 2年目以降の所得税の分は12月（年末調整）
+    assert.ok(rows.find((x) => x.ym === toYM(2028, 12))!.deduction > 0);
+    // 13年分（2027〜2039年）。年ごとの合計は年末残高×0.7%を超えない
+    const total = rows.reduce((s, x) => s + x.deduction, 0);
+    assert.ok(total > 0 && total <= 30_000_000 * 0.007 * 13);
+    assert.equal(rows.filter((x) => x.deduction > 0 && x.ym > toYM(2041, 5)).length, 0);
   });
 });

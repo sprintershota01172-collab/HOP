@@ -53,10 +53,30 @@ describe('住宅比較', () => {
     assert.equal(c.houses.length, 3);
     for (const h of c.houses) {
       const src = d.houses.find((x) => x.id === h.id)!;
-      assert.equal(h.total, src.price! + Math.round(src.price! * d.plan.housing.miscRate));
+      // 諸費用は内訳（印紙税・登録免許税・司法書士・融資手数料など）で計算。取得総額 = 物件価格 + 諸費用
+      assert.equal(h.total, h.model.price + h.model.misc);
+      assert.equal(h.model.price, src.price);
+      assert.ok(h.model.misc > src.price! * 0.01 && h.model.misc < src.price! * 0.08, `諸費用 ${h.model.misc}`);
       assert.ok(h.metrics.monthlyHousing > 0);
       assert.ok(h.cost35 > h.total * 0.5);
     }
+  });
+
+  it('諸費用率で計算する設定では 物件価格 × 諸費用率', () => {
+    const rate = clone(d);
+    rate.plan.housing.miscMode = 'rate';
+    const cr = computeAll(rate);
+    for (const h of cr.houses) {
+      const src = rate.houses.find((x) => x.id === h.id)!;
+      assert.equal(h.total, src.price! + Math.round(src.price! * rate.plan.housing.miscRate));
+    }
+  });
+
+  it('以前の版のデータ（諸費用の計算方法がない）は諸費用率のまま読み込む', () => {
+    const old = clone(d) as unknown as Record<string, any>;
+    delete old.plan.housing.miscMode;
+    assert.equal(migrate(old).plan.housing.miscMode, 'rate');
+    assert.equal(migrate(clone(d)).plan.housing.miscMode, 'detail');
   });
 
   it('いちばん安い住宅が自動的に1位になるわけではない', () => {

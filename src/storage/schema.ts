@@ -53,6 +53,8 @@ export function migrate(raw: unknown): AppData {
     assumptions: merge(defaultAssumptions(), p.assumptions),
   };
   plan.self.id = 'self';
+  // 以前の版のデータは諸費用を「物件価格×諸費用率」で計算していたので、そのままにする（内訳での計算は住まいの画面で切り替え）
+  if (isObj(p.housing) && !('miscMode' in p.housing)) plan.housing.miscMode = 'rate';
   // 以前の版の「自由費」はお小遣いと同じものとして、本人・配偶者のお小遣いに半分ずつ（100円未満は本人へ）まとめる
   const pk = plan.pocket;
   if (pk && pk.free) {

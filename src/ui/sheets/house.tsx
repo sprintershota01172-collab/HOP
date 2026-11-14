@@ -108,7 +108,7 @@ export function HouseEditSheet({ close, props }: SheetProps) {
             <MoneyField label="うち建物" value={h.buildingPrice} onChange={(v) => set((x) => void (x.buildingPrice = v))} />
           </div>
           <div className="grid2">
-            <MoneyField label="諸費用" hint="空欄は物件価格×諸費用率" value={h.misc} onChange={(v) => set((x) => void (x.misc = v))} />
+            <MoneyField label="諸費用" hint="空欄は内訳（税・手数料）か諸費用率で計算" value={h.misc} onChange={(v) => set((x) => void (x.misc = v))} />
             <YMField label="入居予定" value={h.moveInYM} onChange={(v) => set((x) => void (x.moveInYM = v))} from={THIS_YEAR} to={THIS_YEAR + 10} />
           </div>
           {h.price == null && h.landPrice != null && h.buildingPrice != null && <div className="micro">物件価格は 土地＋建物 = {yen(h.landPrice + h.buildingPrice)} として計算します。</div>}
