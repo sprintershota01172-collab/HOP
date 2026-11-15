@@ -420,6 +420,8 @@ button.chip { border: 0; }
 .inp .unitbtn { border: 0; background: var(--surface-2); color: var(--ink-2); border-radius: 7px; height: 28px; padding: 0 7px; font-size: var(--fs-xs); font-weight: 700; flex: none; }
 .inp.unset input::placeholder { color: var(--ink-3); font-weight: 500; font-family: var(--font); font-size: 14px; }
 textarea.inp { height: auto; padding: 10px; font-family: var(--font); font-size: 16px; font-weight: 400; resize: none; width: 100%; }
+/* 高さいっぱいに広げる入力欄でも、長い文章は欄の中で縦にスクロールして読めるようにする（.fill の overflow: hidden を打ち消す） */
+textarea.inp.fill { min-height: 120px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; }
 .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; }
 .toggle .lbl { font-size: var(--fs-m); font-weight: 600; }
 .switch { width: 46px; height: 28px; border-radius: 999px; background: var(--line); border: 0; position: relative; flex: none; transition: background 160ms; }

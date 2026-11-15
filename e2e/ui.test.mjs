@@ -217,6 +217,24 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('長いメモの内容は欄の中で縦にスクロールして読める', async () => {
+    const { ctx, page } = await open([390, 844]);
+    await page.click('nav button:nth-child(5)');
+    await page.click('.btn.primary:has-text("メモ")');
+    const long = Array.from({ length: 60 }, (_, i) => `・${i + 1}行目のメモ`).join('\n');
+    await page.fill('#memo-body', long);
+    const r = await page.$eval('#memo-body', (el) => {
+      const cs = getComputedStyle(el);
+      el.scrollTop = 0;
+      el.scrollTop = 99999;
+      return { overflowY: cs.overflowY, scrollable: el.scrollHeight > el.clientHeight, moved: el.scrollTop > 0 };
+    });
+    assert.notEqual(r.overflowY, 'hidden', 'メモの内容欄がスクロールを隠していない');
+    assert.ok(r.scrollable, '長い内容は欄からはみ出す');
+    assert.ok(r.moved, '欄の中で下までスクロールできる');
+    await ctx.close();
+  });
+
   it('書き出したデータを貼り付けて読み込むと元に戻る', async () => {
     const { ctx, page } = await open([390, 844]);
     await settle(page);
