@@ -11,6 +11,7 @@ import { Loan } from './screens/Loan';
 import { Memo } from './screens/Memo';
 import { HouseDetailSheet, HouseEditSheet, WeightsSheet } from './sheets/house';
 import { YearHealthSheet } from './sheets/health';
+import { ChecklistSheet } from './sheets/checklist';
 import { BasisSheet, ConfirmSheet, FpBasisSheet, LoanTermsSheet, MemoEditSheet, JoinRoomSheet, MissingSheet, PrepayEditSheet, SaleSheet, SettingsSheet, WizardSheet } from './sheets/misc';
 import {
   AssumptionsSheet, ChildEditSheet, ChildrenSheet, DebtEditSheet, EventEditSheet, EventsSheet, GoalEditSheet, GoalsSheet, HousingSheet, HouseTaxSheet, IncomeChangeSheet, IncomeSheet,
@@ -25,7 +26,7 @@ const SHEETS: Record<string, (p: SheetProps) => ReactElement | null> = {
   invest: InvestSheet, invEdit: InvEditSheet, goals: GoalsSheet, goalEdit: GoalEditSheet, events: EventsSheet, eventEdit: EventEditSheet,
   work: WorkSheet, workEdit: WorkEditSheet, housing: HousingSheet, houseTax: HouseTaxSheet, assumptions: AssumptionsSheet,
   basis: BasisSheet, fpBasis: FpBasisSheet, loanTerms: LoanTermsSheet, prepayEdit: PrepayEditSheet, missing: MissingSheet, sale: SaleSheet, memoEdit: MemoEditSheet, settings: SettingsSheet, joinRoom: JoinRoomSheet,
-  yearHealth: YearHealthSheet,
+  yearHealth: YearHealthSheet, checklist: ChecklistSheet,
   confirm: ConfirmSheet, wizard: WizardSheet, houseEdit: HouseEditSheet, houseDetail: HouseDetailSheet, weights: WeightsSheet,
 };
 

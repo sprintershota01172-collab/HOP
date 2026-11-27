@@ -436,4 +436,14 @@ export interface AppData {
   updatedAt: number;
   /** サンプルデータを表示中 */
   sample?: boolean;
+  /** 買う前のチェックリスト（未設定は何もチェックしていない状態） */
+  checklist?: Checklist;
+}
+
+/** 買う前のチェックリストのチェック */
+export interface Checklist {
+  /** 決まった項目のチェック（項目のID → 済み） */
+  done: Record<string, boolean>;
+  /** 自分で追加した項目 */
+  custom: { id: ID; text: string; done: boolean }[];
 }

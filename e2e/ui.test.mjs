@@ -876,6 +876,61 @@ describe('家計のゆとり（年ごとの緑・黄・赤）', () => {
   }
 });
 
+describe('買う前のチェックリスト', () => {
+  for (const size of [[390, 844], [375, 560]]) {
+    it(`${size.join('×')}: ホームから開き、家計の自動判定・チェック・項目の追加ができ、再読み込み後も残る`, async () => {
+      const { ctx, page } = await open(size);
+      await settle(page);
+      assert.match(await page.locator('.ck-quick').textContent(), /買う前チェック\s*\d+\/\d+/);
+      await page.click('.ck-quick');
+      await page.waitForTimeout(450);
+      const sheet = page.locator('.sheet:not(.closing)').last();
+      assert.equal(await sheet.locator('h2').textContent(), '買う前のチェックリスト');
+      // 家計: 家賃とローンが重なる時期を自動で判定
+      const auto = await sheet.locator('.pane:not(.out) .ck-auto').allTextContents();
+      assert.ok(auto.some((t) => t.includes('家賃とローンが重なる時期')), auto.join('|'));
+      assert.ok(auto.some((t) => t.includes('家計がきつくなる年がない')));
+      assert.ok((await sheetOverflow(page)) <= 1, '家計のページがはみ出さない');
+      const total = Number((await sheet.locator('.ck-sum').textContent()).match(/\/\s*(\d+)/)[1]);
+      const done0 = Number(await sheet.locator('.ck-sum b').textContent());
+      // 価格: AIで値段を比較した にチェック
+      for (const t of ['価格', '費用', '物件', '契約']) {
+        await sheet.locator(`.ck-tabs button:has-text("${t}")`).click();
+        await page.waitForTimeout(400);
+        assert.ok((await sheetOverflow(page)) <= 1, `${t}のページがはみ出さない`);
+      }
+      await sheet.locator('.ck-tabs button:has-text("価格")').click();
+      await page.waitForTimeout(400);
+      const ai = sheet.locator('.pane:not(.out) .ck-hit', { hasText: 'AIで値段を比較した' });
+      await ai.click();
+      await page.waitForTimeout(150);
+      assert.equal(await ai.getAttribute('aria-checked'), 'true');
+      assert.equal(Number(await sheet.locator('.ck-sum b').textContent()), done0 + 1);
+      // 追加: 自分の項目
+      await sheet.locator('.ck-tabs button:has-text("追加")').click();
+      await page.waitForTimeout(400);
+      await sheet.locator('.ck-add input').fill('駐車場の幅を測った');
+      await sheet.locator('.ck-add button[type="submit"]').click();
+      await page.waitForTimeout(200);
+      assert.equal(await sheet.locator('.pane:not(.out) .ck-row .t').last().textContent(), '駐車場の幅を測った');
+      assert.match(await sheet.locator('.ck-sum').textContent(), new RegExp(`/\\s*${total + 1}`));
+      // 再読み込みしても残る
+      await page.waitForTimeout(2500);
+      await page.reload();
+      await settle(page);
+      assert.match(await page.locator('.ck-quick').textContent(), new RegExp(`${done0 + 1}/${total + 1}`));
+      // 家計の項目をタップすると関係する入力を開く
+      await page.click('.ck-quick');
+      await page.waitForTimeout(450);
+      await page.locator('.sheet:not(.closing) .ck-auto', { hasText: '家賃とローンが重なる時期' }).click();
+      await page.waitForTimeout(450);
+      assert.ok((await page.locator('.sheet:not(.closing)').count()) >= 2, '入力のシートが上に開く');
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    });
+  }
+});
+
 describe('夫婦で共有（claude.ai の保存領域を模したもの）', () => {
   // claude.ai の db・user を、ブラウザ内のメモリで置き換える。__push で「相手の更新」を起こす
   const stub = () => {

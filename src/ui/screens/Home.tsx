@@ -11,6 +11,7 @@ import { startNewHouse } from '../sheets/house';
 import { emptyData } from '../../engine/defaults';
 import { nowYM } from '../../engine/ym';
 import type { ViewModel } from '../../engine/view';
+import { checklistSummary } from '../../engine/checklist';
 
 export function SampleBanner() {
   const s = useStore();
@@ -176,7 +177,7 @@ export function Home() {
         )}
       </div>
 
-      <div className="quick">
+      <div className="quick q4">
         <button className="btn" onClick={() => startNewHouse(s)}>
           <Icon name="plus" />
           住宅を追加
@@ -189,8 +190,25 @@ export function Home() {
           <Icon name="loan" />
           ローン試算
         </button>
+        <ChecklistQuick />
       </div>
     </div>
+  );
+}
+
+/** 買う前のチェックリストの入口（済んだ数と、家計の要確認の印） */
+function ChecklistQuick() {
+  const s = useStore();
+  const sum = checklistSummary(s.data.checklist, s.vm?.buyChecks ?? []);
+  return (
+    <button className="btn ck-quick" onClick={() => s.open({ kind: 'checklist' })} aria-label={`買う前のチェックリスト ${sum.done}/${sum.total} 済み${sum.alerts ? `、家計の要確認${sum.alerts}件` : ''}`}>
+      <Icon name="check" />
+      買う前チェック
+      <small className="num">
+        {sum.done}/{sum.total}
+      </small>
+      {sum.alerts > 0 && <i className="ck-mark alert" />}
+    </button>
   );
 }
 

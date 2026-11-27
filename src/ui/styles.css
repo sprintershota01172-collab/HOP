@@ -521,6 +521,18 @@ textarea.inp.fill { min-height: 120px; overflow-y: auto; overflow-x: hidden; -we
 .quick { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); flex: none; }
 .quick .btn { flex-direction: column; gap: 2px; min-height: 54px; font-size: var(--fs-s); padding: 0 4px; }
 .quick .btn svg { width: 20px; height: 20px; }
+.quick.q4 { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.app .quick.q4 .btn { font-size: var(--fs-xs); padding: 0 2px; white-space: nowrap; gap: 3px; }
+@media (max-height: 700px) {
+  .app .quick.q4 .btn svg { width: 15px; height: 15px; }
+  .app .quick.q4 .ck-quick svg { display: none; }
+}
+.ck-quick { position: relative; }
+.ck-quick small { font-size: 10px; line-height: 12px; color: var(--ink-3); }
+@media (max-height: 700px) {
+  .ck-quick small { position: absolute; top: 1px; left: 0; right: 0; text-align: center; font-size: 9px; line-height: 11px; }
+}
+.ck-quick .ck-mark { top: 5px; right: 6px; }
 
 /* ---------- FP ---------- */
 .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); flex: 1; min-height: 0; grid-auto-rows: 1fr; }
@@ -801,4 +813,47 @@ button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600
   .hl-hero { padding: 6px 10px; }
   .hl-nums { padding: 8px 10px; gap: 4px 10px; }
   .hl-nums .kpi .micro.ellipsis { display: block; }
+}
+
+/* ---------- 買う前のチェックリスト ---------- */
+.ck-bar { display: block; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.ck-bar i { display: block; height: 100%; border-radius: 999px; background: var(--hl-ok); transition: width 0.3s ease; }
+.ck-sum { display: flex; flex-direction: column; gap: 6px; }
+.ck-sum b { font-size: var(--fs-l); }
+.ck-tabs button { position: relative; }
+.ck-mark { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; }
+.ck-mark.done { background: var(--hl-ok); }
+.ck-mark.alert { background: var(--hl-warn); }
+.ck-list { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.ck-auto {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; border: 0; text-align: left; font: inherit; color: var(--ink);
+  background: var(--surface); border-left: 4px solid var(--st, var(--line)); cursor: pointer;
+}
+.ck-auto > svg { color: var(--ink-3); flex: none; width: 16px; height: 16px; }
+.ck-auto .t { font-weight: 700; font-size: var(--fs-s); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ck-detail { line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.st-ok { --st: var(--hl-ok); }
+.st-warn { --st: var(--hl-warn); }
+.st-ng { --st: var(--hl-tight); }
+.st-na { --st: var(--line); }
+.ck-st { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--st); color: #fff; }
+.st-na .ck-st { color: var(--ink-3); }
+.ck-st svg { width: 13px; height: 13px; }
+.ck-tag { font-size: var(--fs-xs); font-weight: 700; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--st) 22%, var(--surface)); color: var(--ink-2); }
+.ck-row { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); }
+.ck-row:last-child { border-bottom: 0; }
+.ck-hit { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 0; border: 0; background: transparent; text-align: left; font: inherit; color: var(--ink); cursor: pointer; }
+.ck-hit .grow { display: flex; flex-direction: column; gap: 2px; }
+.ck-hit .t { font-size: var(--fs-s); font-weight: 600; line-height: 1.35; }
+.ck-row.done .t { color: var(--ink-3); text-decoration: line-through; }
+.ck-hint { line-height: 1.35; }
+.ck-add { gap: 8px; }
+.ck-add .inp { min-width: 0; }
+.ck-add .btn { flex: none; }
+.ck-list:has(.ck-custom) { flex: 1; }
+.ck-custom { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-height: 700px) {
+  .ck-hint { display: none; }
+  .ck-detail { -webkit-line-clamp: 2; }
+  .ck-auto { padding: 6px 10px; }
 }

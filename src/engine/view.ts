@@ -7,6 +7,7 @@ import { monthPies, type MonthPie, type YearRow } from './aggregate';
 import { afterPurchase, breakdown, levers, scenarioChecks, type AfterPurchase, type Breakdown, type Lever, type ScenarioCheck } from './explain';
 import { goalStatus, type GoalStatus } from './goals';
 import { yearHealth, type YearHealth } from './health';
+import { autoChecks, type AutoCheck } from './checklist';
 import type { HouseEval } from './houses';
 import { computeAll, loanTrial, type Computed, type LoanWhatIf } from './index';
 import { tryLoan, type BankLimit, type Budget, type Context, type Fail, type Metrics, type ScenarioKey, type Tier, type TierKey, type TierResult } from './recommend';
@@ -109,6 +110,8 @@ export interface ViewModel {
   /** 自己資金の算出に使った値 */
   downInfo: { cashBefore: Yen; needWithRent: Yen; gift: Yen; moving: Yen } | null;
   fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; list: MonthPie[] }[]; goals: GoalStatus[]; warnings: SimWarning[]; health: YearHealth[] } | null;
+  /** 買う前のチェックリストのうち、家計から自動で判定する項目 */
+  buyChecks: AutoCheck[];
   ms: number;
 }
 
@@ -164,6 +167,18 @@ export function computeView(data: AppData): ViewModel {
         health: yearHealth(c.fp.sim, { reserveMonths: data.plan.assumptions.reserveMonths, retireAllYM: r.retireAllYM }),
       }
     : null;
+  const hp = data.plan.housing;
+  const basisHouse = hp.fpBasis === 'house' ? houses.find((h) => h.id === hp.houseId) : undefined;
+  const earners = r.people.filter((p) => p.net > 0);
+  const buyChecks = autoChecks({
+    data,
+    sim: c.fp?.sim ?? null,
+    health: fp?.health ?? [],
+    purchaseYM: r.purchaseYM,
+    retireAllYM: r.retireAllYM,
+    firstRetireYM: earners.length ? Math.min(...earners.map((p) => p.retireYM)) : null,
+    basisHouse: basisHouse ? { name: basisHouse.name, tier: basisHouse.tier } : null,
+  });
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   return {
     ready: r.ready,
@@ -192,6 +207,7 @@ export function computeView(data: AppData): ViewModel {
       ? { cashBefore: c.rec.ctx.cashBefore, needWithRent: c.rec.ctx.needWithRent, gift: data.plan.housing.gift, moving: data.plan.housing.movingCost ?? 0 }
       : null,
     fp,
+    buyChecks,
     ms: Math.round(t1 - t0),
   };
 }

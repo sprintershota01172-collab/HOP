@@ -77,7 +77,20 @@ export function migrate(raw: unknown): AppData {
     weights: merge({ ...DEFAULT_WEIGHTS }, src.weights),
     updatedAt: typeof src.updatedAt === 'number' ? src.updatedAt : Date.now(),
     sample: src.sample === true,
+    ...(isObj(src.checklist) ? { checklist: checklistOf(src.checklist) } : {}),
   };
+}
+
+/** 買う前のチェックリスト（形の合わない値は捨てる） */
+function checklistOf(v: Record<string, unknown>): NonNullable<AppData['checklist']> {
+  const done: Record<string, boolean> = {};
+  if (isObj(v.done)) for (const [k, x] of Object.entries(v.done)) if (x === true) done[k] = true;
+  const custom = Array.isArray(v.custom)
+    ? v.custom
+        .filter((x): x is Record<string, unknown> => isObj(x) && typeof x.id === 'string' && typeof x.text === 'string')
+        .map((x) => ({ id: x.id as string, text: (x.text as string).slice(0, 80), done: x.done === true }))
+    : [];
+  return { done, custom };
 }
 
 export function toExport(data: AppData): ExportFile {
