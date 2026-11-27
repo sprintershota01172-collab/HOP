@@ -6,6 +6,7 @@ import { housingTaxView, type HousingTaxView } from './housetax';
 import { monthPies, type MonthPie, type YearRow } from './aggregate';
 import { afterPurchase, breakdown, levers, scenarioChecks, type AfterPurchase, type Breakdown, type Lever, type ScenarioCheck } from './explain';
 import { goalStatus, type GoalStatus } from './goals';
+import { yearHealth, type YearHealth } from './health';
 import type { HouseEval } from './houses';
 import { computeAll, loanTrial, type Computed, type LoanWhatIf } from './index';
 import { tryLoan, type BankLimit, type Budget, type Context, type Fail, type Metrics, type ScenarioKey, type Tier, type TierKey, type TierResult } from './recommend';
@@ -107,7 +108,7 @@ export interface ViewModel {
   housingTax: HousingTaxView | null;
   /** 自己資金の算出に使った値 */
   downInfo: { cashBefore: Yen; needWithRent: Yen; gift: Yen; moving: Yen } | null;
-  fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; list: MonthPie[] }[]; goals: GoalStatus[]; warnings: SimWarning[] } | null;
+  fp: { basis: string; years: YearRow[]; months: MonthAsset[]; pies: { year: number; list: MonthPie[] }[]; goals: GoalStatus[]; warnings: SimWarning[]; health: YearHealth[] } | null;
   ms: number;
 }
 
@@ -160,6 +161,7 @@ export function computeView(data: AppData): ViewModel {
         pies: ((all) => c.fp!.years.map((y, i) => ({ year: y.year, list: all[i] })))(monthPies(c.fp.sim, c.fp.years)),
         goals: goalStatus(data.plan.goals, c.fp.sim),
         warnings: c.fp.sim.warnings,
+        health: yearHealth(c.fp.sim, { reserveMonths: data.plan.assumptions.reserveMonths, retireAllYM: r.retireAllYM }),
       }
     : null;
   const t1 = typeof performance !== 'undefined' ? performance.now() : Date.now();

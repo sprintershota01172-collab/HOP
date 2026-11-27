@@ -19,6 +19,10 @@
   --warn-soft: #f4ead2;
   --red: #a8463a;
   --red-soft: #f3dfda;
+  /* 家計のゆとり（緑・黄・赤） */
+  --hl-ok: #5ea47c;
+  --hl-warn: #e6b93c;
+  --hl-tight: #d0533f;
   --shadow: 0 1px 2px rgba(60, 45, 20, 0.06), 0 4px 14px rgba(60, 45, 20, 0.06);
   --scrim: rgba(30, 28, 22, 0.38);
   --c-living: #93b8a0;
@@ -70,6 +74,9 @@
     --warn-soft: #382f1c;
     --red: #e3897b;
     --red-soft: #3c2522;
+    --hl-ok: #5e9f7b;
+    --hl-warn: #d6ad45;
+    --hl-tight: #d9705f;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     --c-living: #4f7f63;
     --c-edu: #c98d4a;
@@ -104,6 +111,9 @@
   --warn-soft: #382f1c;
   --red: #e3897b;
   --red-soft: #3c2522;
+  --hl-ok: #5e9f7b;
+  --hl-warn: #d6ad45;
+  --hl-tight: #d9705f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   --c-living: #4f7f63;
   --c-edu: #c98d4a;
@@ -752,3 +762,40 @@ button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600
 .wf .ln .nm .cnt { font-style: normal; font-weight: 400; font-size: var(--fs-xs); color: var(--ink-3); margin-left: 6px; }
 .table.compact td { padding: 3px 2px; }
 .table.compact th { padding: 2px; }
+
+/* ---------- 家計のゆとり（年ごとの緑・黄・赤） ---------- */
+.hwrap { flex: none; display: flex; flex-direction: column; gap: 1px; }
+.hstrip { position: relative; width: 100%; }
+.hstrip svg { display: block; cursor: pointer; touch-action: manipulation; }
+.hlegend { display: flex; align-items: center; gap: 8px; line-height: 14px; white-space: nowrap; overflow: hidden; }
+.hl-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--hl-c, var(--hl-ok)); }
+.hl-ok { --hl-c: var(--hl-ok); }
+.hl-warn { --hl-c: var(--hl-warn); }
+.hl-tight { --hl-c: var(--hl-tight); }
+.hl-chip {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; vertical-align: 2px; height: 20px; padding: 0 8px; border: 0; border-radius: 999px;
+  font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; color: var(--ink);
+  background: color-mix(in srgb, var(--hl-c) 22%, var(--surface));
+}
+.hl-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--hl-c); }
+.hl-hero {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; min-width: 0;
+  background: color-mix(in srgb, var(--hl-c) 20%, var(--surface)); border-left: 5px solid var(--hl-c);
+}
+.hl-hero .hl-dot { width: 12px; height: 12px; }
+.hl-hero b { font-size: var(--fs-l); white-space: nowrap; }
+.hl-reasons { display: flex; flex-direction: column; gap: 4px; }
+.hl-r { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-s); line-height: 1.4; }
+.hl-r .hl-dot { transform: translateY(-1px); }
+.hl-nums { gap: 6px 12px; }
+.hl-rule { color: var(--ink-3); line-height: 1.45; }
+@media (max-height: 700px) {
+  /* 低い画面: 帯は細くして、すぐ上の年の切り替えに寄せる */
+  .hwrap { margin-top: calc(2px - var(--gap)); }
+  .app .quickyears button { height: 22px; }
+  .app .yearbar .iconbtn { height: 30px; }
+  .app .yearbar .y { line-height: 1.25; }
+  .hl-hero { padding: 6px 10px; }
+  .hl-nums { padding: 8px 10px; gap: 4px 10px; }
+  .hl-nums .kpi .micro.ellipsis { display: block; }
+}

@@ -831,6 +831,51 @@ describe('入力・保存・再計算', () => {
   });
 });
 
+describe('家計のゆとり（年ごとの緑・黄・赤）', () => {
+  for (const size of [[390, 844], [375, 560]]) {
+    it(`${size.join('×')}: 年ごとの帯が出て、タップでその年の詳しい内容 → 前後の年に切り替えられる`, async () => {
+      const { ctx, page } = await open(size);
+      await settle(page);
+      await page.click('nav button:nth-child(2)');
+      await page.waitForSelector('.hstrip svg rect[data-level]');
+      const levels = await page.$$eval('.hstrip rect[data-level]', (els) => els.map((e) => e.dataset.level));
+      assert.ok(levels.length > 30, `年の数 ${levels.length}`);
+      assert.ok(levels.every((l) => ['ok', 'warn', 'tight'].includes(l)));
+      // 年の横に、その年の判定
+      assert.match(await page.locator('.yearbar .hl-chip').textContent(), /ゆとり|きつくなり始め|きつい/);
+      // 帯の右寄り（老後）をタップ → その年を選び、詳しい内容のシートを開く
+      const before = parseInt(await page.locator('.yearbar .y b').textContent(), 10);
+      const box = await page.locator('.hstrip svg').boundingBox();
+      await page.mouse.click(box.x + box.width * 0.8, box.y + box.height / 2);
+      await page.waitForTimeout(450);
+      const sheet = page.locator('.sheet:not(.closing)').last();
+      const title = await sheet.locator('h2').textContent();
+      const m = title.match(/^(\d{4})年の家計のゆとり$/);
+      assert.ok(m, title);
+      const y = Number(m[1]);
+      assert.ok(y > before + 20, `右寄りの年 ${y}`);
+      assert.ok((await sheet.locator('.hl-r').count()) > 0, '判定の理由');
+      assert.match(await sheet.locator('.hl-hero').textContent(), /ゆとり|きつくなり始め|きつい/);
+      assert.ok((await sheetOverflow(page)) <= 1, 'シートがはみ出さない');
+      // 前の年へ
+      await sheet.locator('button[aria-label="前の年"]').click();
+      await page.waitForTimeout(250);
+      assert.equal(await sheet.locator('h2').textContent(), `${y - 1}年の家計のゆとり`);
+      assert.ok((await sheetOverflow(page)) <= 1);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(400);
+      // 閉じると、画面の年もその年になっている
+      assert.equal(await page.locator('.yearbar .y b').textContent(), `${y - 1}年`);
+      // 年の横の判定をタップしても開く
+      await page.click('.yearbar .hl-chip');
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('.sheet:not(.closing) h2').last().textContent(), `${y - 1}年の家計のゆとり`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    });
+  }
+});
+
 describe('夫婦で共有（claude.ai の保存領域を模したもの）', () => {
   // claude.ai の db・user を、ブラウザ内のメモリで置き換える。__push で「相手の更新」を起こす
   const stub = () => {

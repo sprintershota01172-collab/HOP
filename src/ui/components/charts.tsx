@@ -1,5 +1,6 @@
 import React from 'react';
 import type { PieSlice, SplitItem, SplitKey, WorkTag, YearRow } from '../../engine/aggregate';
+import type { HealthLevel, YearHealth } from '../../engine/health';
 import type { IncomeOwner, WorkState } from '../../engine/simulate';
 import { yen } from '../format';
 import { useSize } from './fields';
@@ -436,6 +437,68 @@ export function Ruler({ safe, standard, caution, mark, desired, cap }: { safe: n
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/** 家計のゆとりの呼び名と色 */
+export const HEALTH_LABEL: Record<HealthLevel, string> = { ok: 'ゆとり', warn: 'きつくなり始め', tight: 'きつい' };
+export const HEALTH_COLOR: Record<HealthLevel, string> = { ok: 'var(--hl-ok)', warn: 'var(--hl-warn)', tight: 'var(--hl-tight)' };
+
+/**
+ * 年ごとの家計のゆとりを、1年1マスの帯で並べる（緑・黄・赤）。
+ * タップした位置の年を選ぶ（指で細いマスを狙わなくてよいよう、位置から年を求める）
+ */
+export function HealthStrip({ list, year, onPick, retireYear }: { list: YearHealth[]; year: number; onPick: (y: number) => void; retireYear?: number }) {
+  const { ref, w } = useSize<HTMLDivElement>();
+  // 低い画面では年の目盛りを省いて細くする（帯の高さを本文に回す）
+  const compact = typeof window !== 'undefined' && window.innerHeight <= 700;
+  const bar = compact ? { t: 1.5, h: 9 } : { t: 4, h: 13 };
+  const H = compact ? bar.t * 2 + bar.h : 30;
+  const n = Math.max(1, list.length);
+  const bw = w / n;
+  const sel = list.findIndex((x) => x.year === year);
+  const pick = (clientX: number, el: Element) => {
+    const rect = el.getBoundingClientRect();
+    const i = Math.max(0, Math.min(n - 1, Math.floor((clientX - rect.left) / Math.max(0.0001, bw))));
+    if (list[i]) onPick(list[i].year);
+  };
+  const ri = retireYear != null ? list.findIndex((x) => x.year === retireYear + 1) : -1;
+  const counts = { ok: 0, warn: 0, tight: 0 };
+  for (const x of list) counts[x.level]++;
+  return (
+    <div ref={ref} className="hstrip" style={{ height: H }}>
+      {w > 0 && (
+        <svg className="chart" width={w} height={H} role="button" tabIndex={0}
+          aria-label={`家計のゆとり（年ごと）。ゆとり${counts.ok}年・きつくなり始め${counts.warn}年・きつい${counts.tight}年。タップでその年の詳しい内容`}
+          onClick={(e: MouseEvent) => pick(e.clientX, e.currentTarget as Element)}
+          onKeyDown={(e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(year); }
+          }}
+        >
+          <defs>
+            <clipPath id="hstrip-clip">
+              <rect x={0} y={bar.t} width={w} height={bar.h} rx={5} />
+            </clipPath>
+          </defs>
+          <g clipPath="url(#hstrip-clip)">
+            {list.map((x, i) => (
+              <rect key={x.year} data-level={x.level} x={i * bw} y={bar.t} width={bw + 0.6} height={bar.h} fill={HEALTH_COLOR[x.level]} />
+            ))}
+          </g>
+          {ri > 0 && <line x1={ri * bw} x2={ri * bw} y1={bar.t - 3} y2={bar.t + bar.h + 3} stroke="var(--ink-3)" strokeDasharray="2 2" />}
+          {sel >= 0 && (
+            <rect x={Math.max(0.75, sel * bw - 1)} y={0.75} width={Math.max(4, bw + 2)} height={bar.t * 2 + bar.h - 1.5} rx={2.5} fill="none" stroke="var(--ink)" strokeWidth={1.5} />
+          )}
+          {list.map((x, i) =>
+            !compact && x.year % 10 === 0 && i > 1 && i < n - 2 ? (
+              <text key={`l${x.year}`} x={i * bw} y={H - 1} textAnchor="middle" fill="var(--ink-3)" style={{ fontSize: 9 }}>
+                {x.year}
+              </text>
+            ) : null,
+          )}
+        </svg>
+      )}
     </div>
   );
 }

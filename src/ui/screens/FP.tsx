@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { groupLiving, type DetailRow, type PieKind, type PieSlice, type SplitKey } from '../../engine/aggregate';
 import { ageAt, elemStartFY, toYM, ymYear } from '../../engine/ym';
-import { AssetChart, Donut, IncomeSplit, MonthAssetChart, PERSON_COLOR, SLICE_COLOR, YearBars } from '../components/charts';
+import { AssetChart, Donut, HEALTH_LABEL, HealthStrip, IncomeSplit, MonthAssetChart, PERSON_COLOR, SLICE_COLOR, YearBars } from '../components/charts';
 import { Badge, Kpi, Money } from '../components/bits';
 import { useFit, usePages, useSwipe } from '../components/fields';
 import { Switcher } from '../components/Switcher';
@@ -90,6 +90,12 @@ function Result() {
   ];
   const swipe = useSwipe(() => setYear(year + 1), () => setYear(year - 1));
   const yr = fp.years.find((y) => y.year === year)!;
+  // 家計のゆとり（緑・黄・赤）。帯や年のしるしをタップすると、その年の詳しい内容を出す
+  const hl = fp.health.find((x) => x.year === year);
+  const openHealth = (y: number) => {
+    setYear(y);
+    s.open({ kind: 'yearHealth', props: { year: y } });
+  };
   const entry = fp.pies.find((p) => p.year === year)!;
   // 賞与を6・12月に受け取る年は「ふだんの月」と「ボーナス月」を分ける（年平均も選べる）
   const [kind, setKind] = useState<PieKind>('normal');
@@ -123,6 +129,12 @@ function Result() {
         </button>
         <div className="y">
           <b>{year}年</b>
+          {hl && (
+            <button className={`hl-chip hl-${hl.level}`} onClick={() => openHealth(year)} aria-label={`${year}年の家計は${HEALTH_LABEL[hl.level]}。詳しく見る`}>
+              <i />
+              {HEALTH_LABEL[hl.level]}
+            </button>
+          )}
           <span className="micro ages ellipsis">{ages}</span>
         </div>
         <button className="iconbtn" onClick={() => setYear(year + 1)} aria-label="次の年">
@@ -135,6 +147,18 @@ function Result() {
             {l}
           </button>
         ))}
+      </div>
+      <div className="hwrap">
+        <div className="hlegend micro hide-short" aria-hidden="true">
+          <span className="grow">家計のゆとり（タップで詳しく）</span>
+          {(['ok', 'warn', 'tight'] as const).map((k) => (
+            <span key={k} className="row" style={{ gap: 3 }}>
+              <i className={`hl-dot hl-${k}`} />
+              {HEALTH_LABEL[k]}
+            </span>
+          ))}
+        </div>
+        <HealthStrip list={fp.health} year={year} onPick={openHealth} retireYear={retireY} />
       </div>
       <div className="seg">
         {(['month', 'year', 'asset'] as View[]).map((v) => (
@@ -307,9 +331,24 @@ function Assets({ year, setYear }: { year: number; setYear: (y: number) => void 
 
 /** その年のできごと（購入・誕生・入学・育休・退職・イベント） */
 function Happenings({ year }: { year: number }) {
+  const list = useHappenings(year);
+  if (!list.length) return null;
+  return (
+    <div className="happen hide-short" title={list.map((x) => x.text).join('、')}>
+      <Icon name={list[0].icon} />
+      <span className="ellipsis">
+        {year}年: {list.map((x) => x.text).join('、')}
+      </span>
+    </div>
+  );
+}
+
+/** その年のできごとの一覧 */
+export function useHappenings(year: number): { icon: string; text: string }[] {
   const s = useStore();
   const p = s.data.plan;
-  const vm = s.vm!;
+  const vm = s.vm;
+  if (!vm) return [];
   const list: { icon: string; text: string }[] = [];
   if (p.housing.fpBasis !== 'none' && ymYear(vm.purchaseYM) === year) list.push({ icon: 'house', text: '住宅を購入' });
   for (const c of p.children) {
@@ -333,15 +372,7 @@ function Happenings({ year }: { year: number }) {
           : ymYear(e.startYM) === year;
     if (hit) list.push({ icon: e.icon, text: e.name });
   }
-  if (!list.length) return null;
-  return (
-    <div className="happen hide-short" title={list.map((x) => x.text).join('、')}>
-      <Icon name={list[0].icon} />
-      <span className="ellipsis">
-        {year}年: {list.map((x) => x.text).join('、')}
-      </span>
-    </div>
-  );
+  return list;
 }
 
 /** 選んだ項目の内訳（月平均）。行をタップすると、その金額の入力画面を開く */
