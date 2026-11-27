@@ -794,7 +794,10 @@ button.chip { border: 0; font: inherit; font-size: var(--fs-s); font-weight: 600
   .hwrap { margin-top: calc(2px - var(--gap)); }
   .app .quickyears button { height: 22px; }
   .app .yearbar .iconbtn { height: 30px; }
-  .app .yearbar .y { line-height: 1.25; }
+  .app .yearbar .y { line-height: 1.2; }
+  .app .yearbar .y .ages { line-height: 12px; }
+  /* 帯の分の高さを、前提のボタンを低くして空ける */
+  .app .fp-basis button.chip { min-height: 26px; }
   .hl-hero { padding: 6px 10px; }
   .hl-nums { padding: 8px 10px; gap: 4px 10px; }
   .hl-nums .kpi .micro.ellipsis { display: block; }

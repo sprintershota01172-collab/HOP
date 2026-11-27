@@ -453,7 +453,7 @@ export function HealthStrip({ list, year, onPick, retireYear }: { list: YearHeal
   const { ref, w } = useSize<HTMLDivElement>();
   // 低い画面では年の目盛りを省いて細くする（帯の高さを本文に回す）
   const compact = typeof window !== 'undefined' && window.innerHeight <= 700;
-  const bar = compact ? { t: 1.5, h: 9 } : { t: 4, h: 13 };
+  const bar = compact ? { t: 1, h: 8 } : { t: 4, h: 13 };
   const H = compact ? bar.t * 2 + bar.h : 30;
   const n = Math.max(1, list.length);
   const bw = w / n;

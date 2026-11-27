@@ -111,7 +111,7 @@ function Result() {
   const yearSplit = yearPie?.splitSum ?? [];
   return (
     <>
-      <div className="row" style={{ flex: 'none' }}>
+      <div className="row fp-basis" style={{ flex: 'none' }}>
         <button className="chip" onClick={() => s.open({ kind: 'fpBasis' })}>
           <Icon name="house" />
           前提: {fp.basis}
