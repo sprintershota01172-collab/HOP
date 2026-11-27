@@ -1,4 +1,4 @@
-import { annuityPayment, principalFromPayment } from './loan';
+import { annuityPayment, bonusPrincipalOf, principalFromPayment } from './loan';
 import { ASSUME, CARE_RESERVE, PURCHASE_FEES, SCREENING } from './reference';
 import type { Resolved } from './resolve';
 import { incomeOf, simulate, spendOf, type HouseModel, type MonthRow, type Purchase, type Scenario, type SimResult } from './simulate';
@@ -250,7 +250,8 @@ export function makeContext(r: Resolved): Context {
 /** 購入後の毎月の住宅費（初年度の概算） */
 export function housingMonthly(ctx: Context, house: HouseModel, loan: Yen): Yen {
   const t = ctx.terms;
-  const pay = loan > 0 ? annuityPayment(loan * (1 - t.bonusShare), t.rate / 12, t.years * 12) + annuityPayment(loan * t.bonusShare, t.rate / 2, Math.floor(t.years * 2)) / 6 : 0;
+  const pb = bonusPrincipalOf(t, loan);
+  const pay = loan > 0 ? annuityPayment(loan - pb, t.rate / 12, t.years * 12) + annuityPayment(pb, t.rate / 2, Math.floor(t.years * 2)) / 6 : 0;
   const tax = house.propertyTaxAnnual ?? estimatePropertyTax({ ...house, cutEnabled: ctx.r.plan.housing.newBuildTaxCut }, 0, cityPlanRateOf(ctx.r.plan.assumptions.region));
   return pay + tax / 12 + house.insuranceAnnual / 12 + house.maintenanceMonthly + house.parkingMonthly;
 }
@@ -492,7 +493,7 @@ const EMPTY_BUDGET: Budget = { loan: 0, total: 0, price: 0, down: 0, payment: 0,
 
 const budgetOf = (t: Trial): Budget => {
   const sch = t.sim.schedule;
-  return { loan: t.loan, total: t.total, price: t.house.price, down: t.down, payment: sch ? sch.firstMonthly : 0, paymentBonus: sch ? sch.bonus[5] ?? 0 : 0 };
+  return { loan: t.loan, total: t.total, price: t.house.price, down: t.down, payment: sch ? sch.firstMonthly : 0, paymentBonus: sch ? sch.firstBonus : 0 };
 };
 
 export function recommend(r: Resolved): Recommendation {

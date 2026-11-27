@@ -1,4 +1,4 @@
-import { buildSchedule, ratePath, type LoanSchedule } from './loan';
+import { bonusSpec, buildSchedule, ratePath, type LoanSchedule } from './loan';
 import { ACQUISITION_TAX, ASSUME, CHILD_ALLOWANCE, DEDUCTION, CHILD_LIVING, EDU_JUKU, EDU_LUNCH, EDU_MEXT, EDU_UNIV, JUKU_FROM_GRADE, LEAVE, LUNCH_RELIEF_FROM, eduOutside } from './reference';
 import { FUKUSHOKU_EXEMPT_BELOW, NATIONAL, nurseryFee, REGIONS, residentIncomeTax, type RegionInfo } from './region';
 import { annuityPayment } from './loan';
@@ -943,7 +943,7 @@ export function simulate(r: Resolved, purchase: Purchase | null, sc: Scenario, o
       principal: purchase.loan,
       months: t.years * 12,
       method: t.method,
-      bonusShare: t.bonusShare,
+      ...bonusSpec(t, purchase.ym),
       rateAt: ratePath(t.rateType, t.rate, {
         fixedYears: t.fixedYears,
         afterRate: t.afterRate,

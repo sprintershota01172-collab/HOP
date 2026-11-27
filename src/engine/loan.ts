@@ -1,4 +1,4 @@
-import type { Rate, RepayMethod, Yen } from './types';
+import type { LoanTerms, Rate, RepayMethod, Yen } from './types';
 
 /** 元利均等の1回あたり返済額（端数処理なしの理論値） */
 export function annuityPayment(principal: number, periodRate: number, periods: number): number {
@@ -23,6 +23,12 @@ export interface LoanSpec {
   method: RepayMethod;
   /** ボーナス返済に回す元金の割合 0〜0.5 */
   bonusShare: Rate;
+  /** ボーナス返済1回あたりの額（指定したときは割合の代わりに、この額になる元金をボーナス返済に回す。上限は借入額の50%） */
+  bonusPay?: Yen;
+  /** 借入した月（1〜12）。指定するとボーナス返済は bonusMonths の月に行う（未指定なら借入から6か月ごと） */
+  startMonth?: number;
+  /** ボーナス返済をする月（既定 6月・12月） */
+  bonusMonths?: number[];
   /** 返済k回目（1始まり、借入翌月=1）の適用金利（年） */
   rateAt: (k: number) => Rate;
   /** 繰上返済（k回目の返済の後に、毎月返済部分の元金へ充てる） */
@@ -50,6 +56,42 @@ export interface LoanSchedule {
   maxMonthly: Yen;
   /** 実際に完済する回（繰上返済で早まる） */
   lastK: number;
+  /** ボーナス返済に回した元金 */
+  bonusPrincipal: Yen;
+  /** 初回のボーナス返済額（なければ0） */
+  firstBonus: Yen;
+}
+
+/** ボーナス返済をする回（k = 1始まり）の一覧 */
+export function bonusKs(n: number, startMonth?: number, months: number[] = [6, 12]): number[] {
+  const out: number[] = [];
+  for (let k = 1; k <= n; k++) {
+    if (startMonth == null ? k % 6 === 0 : months.includes(((startMonth - 1 + k) % 12) + 1)) out.push(k);
+  }
+  return out;
+}
+
+/** ボーナス払いの方式（以前のデータは割合が0より大きければ「割合」） */
+export const bonusModeOf = (t: Pick<LoanTerms, 'bonusMode' | 'bonusShare'>): 'none' | 'share' | 'amount' => t.bonusMode ?? (t.bonusShare > 0 ? 'share' : 'none');
+
+/** ローン条件から、返済予定表に渡すボーナス返済の指定を作る */
+export function bonusSpec(t: LoanTerms, startYM?: number): Pick<LoanSpec, 'bonusShare' | 'bonusPay' | 'startMonth' | 'bonusMonths'> {
+  const mode = bonusModeOf(t);
+  const startMonth = startYM == null ? undefined : (((startYM % 12) + 12) % 12) + 1;
+  const bonusMonths = t.bonusMonths ?? [6, 12];
+  if (mode === 'amount') return { bonusShare: 0, bonusPay: Math.max(0, t.bonusAmount ?? 0), startMonth, bonusMonths };
+  if (mode === 'share') return { bonusShare: t.bonusShare, startMonth, bonusMonths };
+  return { bonusShare: 0, startMonth, bonusMonths };
+}
+
+/** ボーナス返済に回す元金（概算用。年2回・半年ごとの利率で計算） */
+export function bonusPrincipalOf(t: LoanTerms, loan: Yen): Yen {
+  if (loan <= 0) return 0;
+  const mode = bonusModeOf(t);
+  const periods = Math.floor(t.years * 2);
+  if (mode === 'share') return Math.round(loan * Math.min(0.5, Math.max(0, t.bonusShare)));
+  if (mode === 'amount') return Math.min(Math.round(loan * 0.5), Math.round(principalFromPayment(Math.max(0, t.bonusAmount ?? 0), t.rate / 2, periods)));
+  return 0;
 }
 
 /**
@@ -77,14 +119,25 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
     firstMonthly: 0,
     maxMonthly: 0,
     lastK: n,
+    bonusPrincipal: 0,
+    firstBonus: 0,
   };
   const P = Math.max(0, Math.round(spec.principal));
   if (n === 0 || P === 0) return out;
 
-  const bonusPeriods = Math.floor(n / 6);
-  const share = bonusPeriods > 0 ? Math.min(0.5, Math.max(0, spec.bonusShare)) : 0;
-  const Pb = Math.round(P * share);
+  const ks = bonusKs(n, spec.startMonth, spec.bonusMonths);
+  const bonusPeriods = ks.length;
+  const lastBonusK = ks[bonusPeriods - 1] ?? 0;
+  let Pb: number;
+  if (bonusPeriods === 0) Pb = 0;
+  else if (spec.bonusPay != null && spec.bonusPay > 0) {
+    // 1回あたりの額から元金を逆算（元利均等は年2回の返済、元金均等は初回の額で合わせる）
+    const r1 = spec.rateAt(1);
+    const raw = spec.method === 'annuity' ? principalFromPayment(spec.bonusPay, r1 / 2, bonusPeriods) : spec.bonusPay / (1 / bonusPeriods + r1 / 2);
+    Pb = Math.min(Math.round(P * 0.5), Math.round(raw));
+  } else Pb = Math.round(P * Math.min(0.5, Math.max(0, spec.bonusShare)));
   const Pm = P - Pb;
+  out.bonusPrincipal = Pb;
 
   let balM = Pm;
   let balB = Pb;
@@ -99,6 +152,9 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
   let unpaid = 0; // 125%ルールで持ち越した未払利息
   let recalc = false; // 返済額軽減型の繰上返済の後は、翌月に返済額を計算し直す
   let eqM = eqPrinM;
+  const isBonus = new Set(ks);
+  let prevBonusK = 0;
+  let bonusNo = 0;
   const prepays = new Map<number, { amount: number; mode: 'shorten' | 'reduce' }[]>();
   for (const x of spec.prepay ?? []) if (x.k >= 1 && x.k < n && x.amount > 0) prepays.set(x.k, [...(prepays.get(x.k) ?? []), x]);
 
@@ -160,9 +216,11 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
 
     // --- ボーナス返済部分 ---
     let bonusPay = 0;
-    if (balB > 0 && k % 6 === 0) {
-      const j = k / 6; // 何回目のボーナス返済か
-      const ib = Math.floor((balB * r) / 2);
+    if (balB > 0 && isBonus.has(k)) {
+      const j = ++bonusNo; // 何回目のボーナス返済か
+      const gap = k - prevBonusK; // 前回のボーナス返済（初回は借入）からの月数
+      prevBonusK = k;
+      const ib = Math.floor((balB * r * gap) / 12);
       let pb: number;
       if (spec.method === 'annuity') {
         if (Number.isNaN(lastRateB) || r !== lastRateB) {
@@ -173,7 +231,7 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
       } else {
         pb = eqPrinB;
       }
-      if (j === bonusPeriods || pb >= balB) pb = balB;
+      if (j === bonusPeriods || k === lastBonusK || pb >= balB) pb = balB;
       balB -= pb;
       interest += ib;
       principal += pb;
@@ -206,6 +264,7 @@ export function buildSchedule(spec: LoanSpec): LoanSchedule {
     if (balM + balB + unpaid <= 0 && out.lastK === n && k < n) out.lastK = k;
   }
   out.firstMonthly = out.monthly[0];
+  out.firstBonus = out.bonus.find((v) => v > 0) ?? 0;
   return out;
 }
 

@@ -121,3 +121,53 @@ describe('住宅ローン 返済予定表', () => {
     assert.equal(principalFromPayment(100_000, 0, 420), 42_000_000);
   });
 });
+
+describe('ボーナス払い（ボーナス併用払い）', () => {
+  const base = { principal: 30_000_000, months: 420, method: 'annuity' as const, rateAt: fixed(0.01) };
+
+  it('6・12月を指定すると、借入月に関係なくその月にボーナス返済する', () => {
+    // 3月に借入 → 1回目は4月。6月は3回目、12月は9回目
+    const s = buildSchedule({ ...base, bonusShare: 0.2, startMonth: 3, bonusMonths: [6, 12] });
+    const ks = s.bonus.map((v, i) => (v > 0 ? i + 1 : 0)).filter((k) => k > 0);
+    assert.equal(ks[0], 3);
+    assert.equal(ks[1], 9);
+    assert.ok(ks.every((k) => [6, 12].includes(((3 - 1 + k) % 12) + 1)));
+    assert.equal(s.balance[s.months - 1], 0, '完済する');
+    assert.equal(s.totalPrincipal, 30_000_000);
+    assert.equal(s.firstBonus, s.bonus[2]);
+  });
+
+  it('ボーナス払いにすると毎月の返済は下がり、利息の合計は少し増える', () => {
+    const none = buildSchedule({ ...base, bonusShare: 0, startMonth: 6 });
+    const with20 = buildSchedule({ ...base, bonusShare: 0.2, startMonth: 6 });
+    assert.ok(with20.firstMonthly < none.firstMonthly);
+    assert.ok(with20.totalInterest > none.totalInterest);
+    assert.equal(with20.bonusPrincipal, 6_000_000);
+  });
+
+  it('1回あたりの額で指定すると、ボーナス返済はほぼその額になる', () => {
+    const s = buildSchedule({ ...base, bonusShare: 0, bonusPay: 100_000, startMonth: 6 });
+    // 初回以外（半年ごと）のボーナス返済が指定額に近い
+    const second = s.bonus.filter((v) => v > 0)[1];
+    assert.ok(Math.abs(second - 100_000) <= 1, `2回目 ${second}`);
+    assert.equal(s.balance[s.months - 1], 0);
+    assert.ok(s.bonusPrincipal > 0 && s.bonusPrincipal <= 15_000_000);
+  });
+
+  it('1回あたりの額が大きすぎても、ボーナス返済の元金は借入額の50%まで', () => {
+    const s = buildSchedule({ ...base, bonusShare: 0, bonusPay: 5_000_000, startMonth: 1 });
+    assert.equal(s.bonusPrincipal, 15_000_000);
+    assert.equal(s.balance[s.months - 1], 0);
+  });
+
+  it('元金均等でもボーナス返済の元金を返しきる', () => {
+    const s = buildSchedule({ ...base, method: 'equalPrincipal', bonusShare: 0.3, startMonth: 10, bonusMonths: [7, 12] });
+    assert.equal(s.balance[s.months - 1], 0);
+    assert.equal(s.totalPrincipal, 30_000_000);
+  });
+
+  it('月の指定がなければ、これまでどおり借入から6か月ごと', () => {
+    const s = buildSchedule({ ...base, bonusShare: 0.2 });
+    assert.ok(s.bonus[5] > 0 && s.bonus[4] === 0 && s.bonus[11] > 0);
+  });
+});

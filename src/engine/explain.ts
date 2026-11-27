@@ -197,7 +197,7 @@ export function breakdown(rec: Recommendation): Breakdown | null {
     lines,
     payment: per(pay),
     firstPayment: sch ? sch.firstMonthly : 0,
-    bonusPayment: sch ? sch.bonus[5] ?? 0 : 0,
+    bonusPayment: sch ? sch.firstBonus : 0,
     loan: rec.loan,
     rate: terms.rate,
     years: terms.years,

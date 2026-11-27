@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { LoanView, ViewModel } from '../../engine/view';
+import { bonusModeOf } from '../../engine/loan';
 import { Switcher } from '../components/Switcher';
 import { FlowCards } from '../sheets/misc';
 import { Diff, Kpi, Money, tierNote, TierChip } from '../components/bits';
@@ -134,6 +135,7 @@ export function Loan() {
           <button className="grow ellipsis micro" style={{ border: 0, background: 'transparent', padding: '4px 0', textAlign: 'left', color: 'var(--ink-2)' }} onClick={() => s.open({ kind: 'loanTerms', props: {} })}>
             <b style={{ color: 'var(--ink)' }}>
               {RATE_LABEL[t.rateType]} {(t.rate * 100).toFixed(2)}%・{r?.years ?? t.years}年・{t.method === 'annuity' ? '元利均等' : '元金均等'}
+              {bonusModeOf(t) !== 'none' && '・ボーナス併用'}
             </b>
             ・購入 {ymText(vm.purchaseYM)}・自己資金 {yen(r?.down ?? vm.rec.final.down)}
           </button>

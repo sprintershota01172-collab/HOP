@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Lever } from '../../engine/explain';
-import { buildSchedule, ratePath } from '../../engine/loan';
+import { bonusModeOf, bonusSpec, buildSchedule, ratePath } from '../../engine/loan';
 import type { ViewModel } from '../../engine/view';
 import { emptyData, uid } from '../../engine/defaults';
 import { ASSUME, CHECKED, SOURCES } from '../../engine/reference';
@@ -480,14 +480,14 @@ export function MissingSheet({ close }: SheetProps) {
 }
 
 /* ---------- ローン条件 ---------- */
-export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how' | 'prepay' }) {
+export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how' | 'bonus' | 'prepay' }) {
   const s = useStore();
   const h = s.data.plan.housing;
   const t = h.loan;
   const spouse = s.data.plan.spouse;
   const set = (fn: (x: typeof t) => void) => s.update((d) => void (fn(d.plan.housing.loan), (d.sample = false)));
-  const pages = [{ value: 'who' as const, label: '借りる人' }, { value: 'rate' as const, label: '金利' }, { value: 'how' as const, label: '返し方' }, { value: 'prepay' as const, label: '繰上返済' }];
-  const [page, setPage] = useState<'who' | 'rate' | 'how' | 'prepay'>(initial ?? 'who');
+  const pages = [{ value: 'who' as const, label: '借りる人' }, { value: 'rate' as const, label: '金利' }, { value: 'how' as const, label: '返し方' }, { value: 'bonus' as const, label: 'ボーナス' }, { value: 'prepay' as const, label: '繰上返済' }];
+  const [page, setPage] = useState<'who' | 'rate' | 'how' | 'bonus' | 'prepay'>(initial ?? 'who');
   const [dir, setDir] = useState(1);
   return (
     <>
@@ -535,11 +535,13 @@ export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how'
           </>
         ) : page === 'prepay' ? (
           <PrepaySection />
+        ) : page === 'bonus' ? (
+          <BonusSection />
         ) : (
           <>
             <NumField label="返済期間" unit="年" nullable={false} min={5} max={50} value={t.years} onChange={(v) => set((x) => void (x.years = Math.round(v ?? 35)))} hint="完済80歳を超える分は短くして計算" />
             <Seg label="返済方式" value={t.method} onChange={(v) => set((x) => void (x.method = v))} options={[{ value: 'annuity', label: '元利均等（毎月同じ）' }, { value: 'equalPrincipal', label: '元金均等（だんだん減る）' }]} />
-            <NumField label="ボーナス返済の割合" unit="%" scale={100} nullable={false} min={0} max={50} value={t.bonusShare} onChange={(v) => set((x) => void (x.bonusShare = v ?? 0))} hint="借入額のうち。0%でなし" />
+            {bonusModeOf(t) === 'none' && <div className="micro">ボーナス払い（ボーナス併用払い）は「ボーナス」で設定できます。</div>}
             <NumField label="審査の目安に使う金利" unit="%" scale={100} nullable={false} min={0} max={10} value={t.screeningRate} onChange={(v) => set((x) => void (x.screeningRate = v ?? 0.035))} />
           </>
         )}
@@ -549,9 +551,85 @@ export function LoanTermsSection({ initial }: { initial?: 'who' | 'rate' | 'how'
 }
 export const LoanTermsSheet = ({ close, props }: SheetProps) => (
   <Sheet title="ローンの条件" onClose={close} preview foot={<Done close={close} />}>
-    <LoanTermsSection initial={(props.page as 'who' | 'rate' | 'how' | 'prepay') ?? (props.focus === 'desired' ? 'who' : 'rate')} />
+    <LoanTermsSection initial={(props.page as 'who' | 'rate' | 'how' | 'bonus' | 'prepay') ?? (props.focus === 'desired' ? 'who' : 'rate')} />
   </Sheet>
 );
+
+const BONUS_MONTHS: { value: string; label: string; months: number[] }[] = [
+  { value: '6-12', label: '6・12月', months: [6, 12] },
+  { value: '7-12', label: '7・12月', months: [7, 12] },
+  { value: '8-12', label: '8・12月', months: [8, 12] },
+];
+
+/** ボーナス払い（ボーナス併用払い）の設定と、ボーナス払いなしとの比べ */
+function BonusSection() {
+  const s = useStore();
+  const h = s.data.plan.housing;
+  const t = h.loan;
+  const mode = bonusModeOf(t);
+  const set = (fn: (x: typeof t) => void) => s.update((d) => void (fn(d.plan.housing.loan), (d.sample = false)));
+  const loan = h.desiredLoan ?? s.vm?.rec.final.loan ?? 0;
+  const pym = h.purchaseYM ?? s.vm?.purchaseYM ?? nowYM() + 12;
+  const monthsKey = (BONUS_MONTHS.find((o) => o.months.join() === (t.bonusMonths ?? [6, 12]).join()) ?? BONUS_MONTHS[0]).value;
+  const cmp = useMemo(() => {
+    if (!loan || mode === 'none') return null;
+    const base = { principal: loan, months: t.years * 12, method: t.method, rateAt: ratePath(t.rateType, t.rate, { fixedYears: t.fixedYears, afterRate: t.afterRate }), rule125: t.rule125 && t.rateType !== 'fixed' };
+    const a = buildSchedule({ ...base, ...bonusSpec({ ...t, bonusMode: 'none' }, pym) });
+    const b = buildSchedule({ ...base, ...bonusSpec(t, pym) });
+    return { a, b };
+  }, [loan, pym, t, mode]);
+  // 賞与（手取り）1回分。ペアローンなら夫婦の合計
+  const p = s.data.plan;
+  const bonusNet = ((p.self.bonusNetAnnual ?? 0) + (t.borrower === 'pair' && p.spouse ? p.spouse.bonusNetAnnual ?? 0 : 0)) / 2;
+  const ratio = cmp && bonusNet > 0 ? cmp.b.firstBonus / bonusNet : null;
+  return (
+    <>
+      <Seg
+        label="ボーナス払い（ボーナス併用払い）"
+        value={mode}
+        onChange={(v) =>
+          set((x) => {
+            x.bonusMode = v;
+            if (v === 'share' && !(x.bonusShare > 0)) x.bonusShare = 0.2;
+            if (v === 'amount' && !(x.bonusAmount && x.bonusAmount > 0)) x.bonusAmount = 100_000;
+          })
+        }
+        options={[{ value: 'none', label: 'なし' }, { value: 'share', label: '割合で' }, { value: 'amount', label: '金額で' }]}
+      />
+      {mode !== 'none' && (
+        <div className="grid2">
+          {mode === 'share' ? (
+            <NumField label="ボーナスで返す割合" unit="%" scale={100} nullable={false} min={0} max={50} value={t.bonusShare} onChange={(v) => set((x) => void (x.bonusShare = v ?? 0))} hint="借入額のうち（50%まで）" />
+          ) : (
+            <MoneyField label="ボーナス月に足す額" hint="1回あたり" nullable={false} value={t.bonusAmount ?? 0} onChange={(v) => set((x) => void (x.bonusAmount = v ?? 0))} />
+          )}
+          <Seg label="返す月" value={monthsKey} onChange={(v) => set((x) => void (x.bonusMonths = (BONUS_MONTHS.find((o) => o.value === v) ?? BONUS_MONTHS[0]).months))} options={BONUS_MONTHS.map(({ value, label }) => ({ value, label }))} />
+        </div>
+      )}
+      {cmp && (
+        <div className="card flat stack" id="bonus-compare" style={{ gap: 4 }}>
+          <div className="row between">
+            <span className="micro">毎月の返済</span>
+            <span className="micro">
+              <span className="num">{yen(cmp.a.firstMonthly)}</span> → <b className="num pos">{yen(cmp.b.firstMonthly)}</b>
+            </span>
+          </div>
+          <div className="row between">
+            <span className="micro">ボーナス月に足す返済{ratio != null ? `（賞与の${Math.round(ratio * 100)}%）` : ''}</span>
+            <b className={`num${ratio != null && ratio > 0.5 ? ' interest' : ''}`}>{yen(cmp.b.firstBonus, { sign: true })}</b>
+          </div>
+          <div className="row between">
+            <span className="micro">利息の合計の差</span>
+            <b className="num interest">{yen(cmp.b.totalInterest - cmp.a.totalInterest, { sign: true })}</b>
+          </div>
+          <div className="micro" style={{ lineHeight: 1.6 }}>
+            借入 {yen(loan)}・金利が変わらない場合。{ratio != null && ratio > 0.5 ? '賞与（手取り1回分）の半分を超えています。賞与が減っても返済額は変わりません。' : '賞与が減っても返済額は変わりません。'}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 /** 繰上返済の予定と、その効果（目指す予算の借入額で、金利が変わらない場合） */
 function PrepaySection() {
@@ -563,7 +641,7 @@ function PrepaySection() {
   const pym = h.purchaseYM ?? s.vm?.purchaseYM ?? nowYM() + 12;
   const eff = useMemo(() => {
     if (!loan) return null;
-    const base = { principal: loan, months: t.years * 12, method: t.method, bonusShare: t.bonusShare, rateAt: ratePath(t.rateType, t.rate, { fixedYears: t.fixedYears, afterRate: t.afterRate }), rule125: t.rule125 };
+    const base = { principal: loan, months: t.years * 12, method: t.method, ...bonusSpec(t, pym), rateAt: ratePath(t.rateType, t.rate, { fixedYears: t.fixedYears, afterRate: t.afterRate }), rule125: t.rule125 };
     const a = buildSchedule(base);
     const b = buildSchedule({ ...base, prepay: list.map((x) => ({ k: x.ym - pym, amount: x.amount, mode: x.mode })) });
     return { interest: a.totalInterest - b.totalInterest, months: a.lastK - b.lastK, first: a.firstMonthly };

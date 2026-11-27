@@ -735,6 +735,34 @@ describe('入力・保存・再計算', () => {
     await ctx.close();
   });
 
+  it('ローンをボーナス払い（割合・金額）で試算でき、画面に収まる', async () => {
+    for (const size of [[375, 667], [375, 560]]) {
+      const { ctx, page } = await open(size);
+      await settle(page);
+      const sheet = () => page.locator('.sheet:not(.closing)').last();
+      await page.click('nav button:nth-child(4)');
+      await page.click('.screen .btn:has-text("条件")');
+      await page.waitForTimeout(400);
+      await sheet().locator('.seg button:has-text("ボーナス")').first().click();
+      await page.waitForTimeout(400);
+      assert.equal(await page.locator('#bonus-compare').count(), 0, 'なしのときは比べを出さない');
+      await sheet().locator('.seg button:has-text("割合で")').click();
+      await page.waitForSelector('#bonus-compare:has-text("毎月の返済")', { timeout: 15000 });
+      assert.ok((await sheetOverflow(page)) <= 1, `割合で ${size}`);
+      await sheet().locator('.seg button:has-text("金額で")').click();
+      await page.waitForTimeout(300);
+      assert.equal(await sheet().locator('.field:has-text("ボーナス月に足す額")').count(), 1);
+      await sheet().locator('.seg button:has-text("7・12月")').click();
+      await page.waitForTimeout(300);
+      assert.ok((await sheetOverflow(page)) <= 1, `金額で ${size}`);
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+      assert.ok((await page.locator('.screen').textContent()).includes('ボーナス併用'), 'ローン画面の条件に出る');
+      await page.waitForSelector('.kpi:has-text("賞与月 +")', { timeout: 15000 });
+      await ctx.close();
+    }
+  });
+
   it('繰上返済・収入の変化・売却を入力でき、画面に収まる', async () => {
     const { ctx, page } = await open([375, 667]);
     await settle(page);

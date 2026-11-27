@@ -222,7 +222,7 @@ export function computeLoan(req: LoanRequest): LoanView | null {
     fails,
     metrics,
     schedule: scheduleYears(trial.sim),
-    bonusFirst: trial.sim.schedule ? trial.sim.schedule.bonus[5] ?? 0 : 0,
+    bonusFirst: trial.sim.schedule ? trial.sim.schedule.firstBonus : 0,
     years: trial.purchase.terms.years,
   };
 }

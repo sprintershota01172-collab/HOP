@@ -212,6 +212,12 @@ export interface LoanTerms {
   method: RepayMethod;
   /** ボーナス返済の割合（借入額に対する比率 0〜0.5） */
   bonusShare: Rate;
+  /** ボーナス払いの指定方法（未設定は割合が0より大きければ share） */
+  bonusMode?: 'none' | 'share' | 'amount';
+  /** ボーナス返済1回あたりの額（bonusMode = amount のとき） */
+  bonusAmount?: Yen | null;
+  /** ボーナス返済をする月（既定 6月・12月） */
+  bonusMonths?: number[];
   /** 審査目安に使う金利 */
   screeningRate: Rate;
   borrower: 'self' | 'pair';
